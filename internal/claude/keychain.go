@@ -3,6 +3,7 @@ package claude
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -47,13 +48,10 @@ func quote(s string) string {
 func (k Keychain) Write(b []byte) error {
 	value := hex.EncodeToString(b)
 	line := fmt.Sprintf("add-generic-password -U -a %s -s %s -X %s\n", quote(k.Account), quote(k.Service), value)
-	var code int
-	var err error
-	if len(line) <= 4032 {
-		_, code, err = k.run([]byte(line), "-i")
-	} else {
-		_, code, err = k.run(nil, "add-generic-password", "-U", "-a", k.Account, "-s", k.Service, "-X", value)
+	if len(line) > 4032 {
+		return errors.New("credentials too large to write to the keychain safely")
 	}
+	_, code, err := k.run([]byte(line), "-i")
 	if err != nil {
 		return err
 	}

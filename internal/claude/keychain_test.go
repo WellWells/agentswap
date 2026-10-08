@@ -99,3 +99,17 @@ func TestDarwinProviderUsesKeychain(t *testing.T) {
 		t.Fatalf("%+v", id)
 	}
 }
+
+func TestKeychainNeverPutsLargeSecretInArgv(t *testing.T) {
+	f := &fakeSecurity{items: map[string]string{}}
+	k := Keychain{Service: "Claude Code-credentials", Account: "wells", Run: f.run}
+	big := `{"claudeAiOauth":{"refreshToken":"` + strings.Repeat("x", 3000) + `"}}`
+	if err := k.Write([]byte(big)); err == nil {
+		t.Fatal("oversized write accepted")
+	}
+	for _, c := range f.calls {
+		if len(c) > 2 && c[1] == "add-generic-password" {
+			t.Fatalf("secret passed in argv: %v", c[:6])
+		}
+	}
+}
