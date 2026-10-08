@@ -16,12 +16,14 @@ type api struct {
 	usage    map[string]string
 	refresh  func(body map[string]string) (int, string)
 	hits     []string
+	agents   []string
 	betaSeen bool
 }
 
 func (a *api) server(t *testing.T) *httptest.Server {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.hits = append(a.hits, r.URL.Path)
+		a.agents = append(a.agents, r.URL.Path+" "+r.Header.Get("User-Agent")+" | "+r.Header.Get("Accept"))
 		switch r.URL.Path {
 		case "/api/oauth/usage":
 			a.betaSeen = r.Header.Get("anthropic-beta") == "oauth-2025-04-20"
@@ -56,6 +58,7 @@ func usageProvider(t *testing.T, a *api) Provider {
 	p, _ := setup(t)
 	p.BaseURL, p.RefreshURL = s.URL, s.URL+"/v1/oauth/token"
 	p.Now = func() time.Time { return testNow }
+	p.UserAgent = func() string { return "claude-code/9.9.9" }
 	return p
 }
 
@@ -79,6 +82,12 @@ func TestUsageParsesWindows(t *testing.T) {
 	}
 }
 
+func TestRefreshScopesKeepPluginScope(t *testing.T) {
+	if got := refreshScopes([]string{"user:profile", "user:plugins"}); got != "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload user:plugins" {
+		t.Fatal(got)
+	}
+}
+
 func TestUsageFallsBackToModelFieldsWithoutLimits(t *testing.T) {
 	a := &api{usage: map[string]string{"at": `{"five_hour":null,"seven_day_opus":{"utilization":5,"resets_at":"2026-10-12T00:00:00Z"}}`}}
 	u, _, err := usageProvider(t, a).Usage(context.Background(), snapWith("at", "rt", testNow.Add(time.Hour).UnixMilli()), true)
@@ -90,7 +99,7 @@ func TestUsageFallsBackToModelFieldsWithoutLimits(t *testing.T) {
 func TestInactiveExpiringTokenIsRefreshedAndKeepsFields(t *testing.T) {
 	a := &api{usage: map[string]string{"at2": usageBody}}
 	a.refresh = func(b map[string]string) (int, string) {
-		if b["refresh_token"] != "rt" || b["client_id"] != ClientID || b["grant_type"] != "refresh_token" {
+		if b["refresh_token"] != "rt" || b["client_id"] != ClientID || b["grant_type"] != "refresh_token" || b["scope"] != "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload" {
 			return 400, `{"error":"bad"}`
 		}
 		return 200, `{"access_token":"at2","refresh_token":"rt2","expires_in":3600,"scope":"user:inference user:profile"}`
@@ -98,6 +107,10 @@ func TestInactiveExpiringTokenIsRefreshedAndKeepsFields(t *testing.T) {
 	_, refreshed, err := usageProvider(t, a).Usage(context.Background(), snapWith("at", "rt", testNow.Add(time.Minute).UnixMilli()), false)
 	if err != nil || refreshed == nil {
 		t.Fatalf("err=%v", err)
+	}
+	wantAgents := []string{"/v1/oauth/token axios/1.15.2 | application/json, text/plain, */*", "/api/oauth/usage claude-code/9.9.9 | application/json, text/plain, */*"}
+	if strings.Join(a.agents, "\n") != strings.Join(wantAgents, "\n") {
+		t.Fatalf("agents %q", a.agents)
 	}
 	ai, _ := aiOf(refreshed)
 	if ai.AccessToken != "at2" || ai.RefreshToken != "rt2" || int64(ai.ExpiresAt) != testNow.Add(time.Hour).UnixMilli() {

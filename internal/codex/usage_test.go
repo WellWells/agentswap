@@ -60,7 +60,7 @@ func newBackend(t *testing.T) *backend {
 	b.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/backend-api/wham/usage":
-			b.lastUA.Store(r.Header.Get("User-Agent"))
+			b.lastUA.Store(r.Header.Get("User-Agent") + "|" + r.Header.Get("Originator") + "|" + r.Header.Get("Accept"))
 			tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			body, ok := b.usage[tok+"|"+r.Header.Get("ChatGPT-Account-ID")]
 			if !ok {
@@ -90,7 +90,7 @@ func (b *backend) provider(t *testing.T) Provider {
 		Home:       t.TempDir(),
 		BaseURL:    b.srv.URL + "/backend-api",
 		RefreshURL: b.srv.URL + "/oauth/token",
-		UserAgent:  "agentswap/test",
+		UserAgent:  func() string { return "codex_cli_rs/0.0.1 (Test 1; x86_64) unknown" },
 		Now:        func() time.Time { return now },
 	}
 }
@@ -136,7 +136,7 @@ func TestUsageLiveBucketsWindowsByLength(t *testing.T) {
 	if w.UsedPercent != 7 || w.Minutes != 10080 || !w.ResetsAt.Equal(time.Unix(1791970861, 0)) {
 		t.Fatalf("window %+v", w)
 	}
-	if b.lastUA.Load() != "agentswap/test" {
+	if b.lastUA.Load() != "codex_cli_rs/0.0.1 (Test 1; x86_64) unknown|codex_cli_rs|*/*" {
 		t.Fatalf("user agent %v", b.lastUA.Load())
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/WellWells/agentswap/internal/jsonx"
+	"github.com/WellWells/agentswap/internal/official"
 	"github.com/WellWells/agentswap/internal/swap"
 )
 
@@ -24,7 +25,11 @@ const (
 	ClientID          = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	betaHeader        = "oauth-2025-04-20"
 	week              = 7 * 24 * 60
+	axiosAccept       = "application/json, text/plain, */*"
+	pluginScope       = "user:plugins"
 )
+
+var defaultScopes = []string{"user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"}
 
 var (
 	ErrLoginExpired = errors.New("login expired; log in to this account again")
@@ -57,7 +62,7 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 	}
 	var refreshed []byte
 	renew := func() error {
-		b, err := p.refresh(ctx, snap, ai.RefreshToken)
+		b, err := p.refresh(ctx, snap, ai.RefreshToken, ai.Scopes)
 		if err != nil {
 			return err
 		}
@@ -141,10 +146,13 @@ func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, er
 	if err != nil {
 		return swap.Usage{}, err
 	}
+	req.Header.Set("Accept", axiosAccept)
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+access)
 	req.Header.Set("anthropic-beta", betaHeader)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", p.UserAgent)
+	if p.UserAgent != nil {
+		req.Header.Set("User-Agent", p.UserAgent())
+	}
 	resp, err := p.client().Do(req)
 	if err != nil {
 		return swap.Usage{}, err
@@ -203,8 +211,24 @@ func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, er
 	return u, nil
 }
 
-func (p Provider) refresh(ctx context.Context, snap []byte, refreshToken string) ([]byte, error) {
-	body, _ := json.Marshal(map[string]string{"grant_type": "refresh_token", "refresh_token": refreshToken, "client_id": ClientID})
+func refreshScopes(granted []string) string {
+	scopes := append([]string(nil), defaultScopes...)
+	for _, s := range granted {
+		if s == pluginScope {
+			scopes = append(scopes, pluginScope)
+			break
+		}
+	}
+	return strings.Join(scopes, " ")
+}
+
+func (p Provider) refresh(ctx context.Context, snap []byte, refreshToken string, granted []string) ([]byte, error) {
+	body, _ := json.Marshal(struct {
+		GrantType    string `json:"grant_type"`
+		RefreshToken string `json:"refresh_token"`
+		ClientID     string `json:"client_id"`
+		Scope        string `json:"scope"`
+	}{"refresh_token", refreshToken, ClientID, refreshScopes(granted)})
 	target := p.RefreshURL
 	if target == "" {
 		target = DefaultRefreshURL
@@ -213,9 +237,9 @@ func (p Provider) refresh(ctx context.Context, snap []byte, refreshToken string)
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Accept", axiosAccept)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", p.UserAgent)
+	req.Header.Set("User-Agent", official.ClaudeAxios)
 	resp, err := p.client().Do(req)
 	if err != nil {
 		return nil, err

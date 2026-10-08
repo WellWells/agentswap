@@ -33,7 +33,7 @@ type Provider struct {
 	Keychain     *Keychain
 	BaseURL      string
 	RefreshURL   string
-	UserAgent    string
+	UserAgent    func() string
 	Client       *http.Client
 	Now          func() time.Time
 	LockWait     time.Duration
@@ -146,10 +146,11 @@ func accountPart(creds []byte) ([]byte, error) {
 }
 
 type aiOauth struct {
-	AccessToken      string  `json:"accessToken"`
-	RefreshToken     string  `json:"refreshToken"`
-	ExpiresAt        float64 `json:"expiresAt"`
-	SubscriptionType string  `json:"subscriptionType"`
+	AccessToken      string   `json:"accessToken"`
+	RefreshToken     string   `json:"refreshToken"`
+	ExpiresAt        float64  `json:"expiresAt"`
+	SubscriptionType string   `json:"subscriptionType"`
+	Scopes           []string `json:"scopes"`
 }
 
 func aiOf(b []byte) (aiOauth, error) {
