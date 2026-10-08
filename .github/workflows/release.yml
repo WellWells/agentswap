@@ -21,7 +21,92 @@ jobs:
           GOFLAGS: -mod=mod
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          go run ./tools/dist -version "${GITHUB_REF_NAME}"
+          mkdir -p brew
+          go run ./tools/dist -version "${GITHUB_REF_NAME}" -brew brew/agentswap.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formula
+          path: brew/agentswap.rb
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag
+        run: |
+          pre=""
+          case "${GITHUB_REF_NAME}" in *-*) pre="--prerelease" ;; esac
+          gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag $pre
+
+  verify-unix:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - env:
+          AGENTSWAP_VERSION: ${{ github.ref_name }}
+        run: |
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/install.sh" | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          agentswap version | grep -F "${GITHUB_REF_NAME#v}"
+          cxswap version
+          if [ "$(uname -s)" = Darwin ]; then
+            if xattr -p com.apple.quarantine "$HOME/.local/bin/agentswap" >/dev/null 2>&1; then
+              echo "agentswap is quarantined" >&2
+              exit 1
+            fi
+            codesign -v "$HOME/.local/bin/agentswap" || [ "$(uname -m)" = x86_64 ]
+          fi
+      - if: runner.os == 'macOS'
+        uses: actions/download-artifact@v4
+        with:
+          name: formula
+      - if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: |
+          brew tap-new --no-git local/agentswap
+          cp agentswap.rb "$(brew --repository)/Library/Taps/local/homebrew-agentswap/Formula/agentswap.rb"
+          brew install local/agentswap/agentswap
+          brew test local/agentswap/agentswap
+          "$(brew --prefix)/bin/cxswap" version
+          "$(brew --prefix)/bin/agyswap" version
+
+  verify-windows:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - shell: powershell
+        env:
+          AGENTSWAP_VERSION: ${{ github.ref_name }}
+        run: |
+          irm "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/install.ps1" | iex
+          cxswap version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $zone = Get-Item "$env:LOCALAPPDATA\agentswap\bin\agentswap.exe" -Stream Zone.Identifier -ErrorAction SilentlyContinue
+          if ($zone) { throw 'agentswap.exe has a Mark of the Web' }
+
+  homebrew:
+    needs: [verify-unix, verify-windows]
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: formula
+      - env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew tap was not updated"
+            exit 0
+          fi
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/WellWells/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp agentswap.rb tap/Formula/agentswap.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/agentswap.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "agentswap ${GITHUB_REF_NAME#v}"
+          git push

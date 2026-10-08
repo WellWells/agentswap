@@ -81,6 +81,42 @@ func TestZipHasExeAndExtras(t *testing.T) {
 	}
 }
 
+func TestFormula(t *testing.T) {
+	sums := map[target]string{
+		{"darwin", "arm64"}: "da",
+		{"darwin", "amd64"}: "di",
+		{"linux", "arm64"}:  "la",
+	}
+	var buf bytes.Buffer
+	if err := writeFormula(&buf, "v1.2.3", sums); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"class Agentswap < Formula\n",
+		"  version \"1.2.3\"\n",
+		"  on_macos do\n    on_arm do\n      url \"https://github.com/WellWells/agentswap/releases/download/v1.2.3/agentswap_darwin_arm64.tar.gz\"\n      sha256 \"da\"\n    end\n\n    on_intel do\n",
+		"      sha256 \"di\"\n",
+		"  on_linux do\n    on_arm do\n",
+		"    system bin/\"agentswap\", \"link\"\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "on_intel") != 1 || strings.Count(got, " do\n")+2 != strings.Count(got, "end\n") {
+		t.Errorf("unbalanced blocks:\n%s", got)
+	}
+	for _, v := range []string{"dev", "1.2.3", "vnext"} {
+		if err := writeFormula(io.Discard, v, sums); err == nil {
+			t.Errorf("%q accepted", v)
+		}
+	}
+	if err := writeFormula(io.Discard, "v1.0.0", map[target]string{{"windows", "amd64"}: "w"}); err == nil {
+		t.Error("windows-only accepted")
+	}
+}
+
 func TestChecksumsFormat(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "b.zip"), []byte("b"), 0o644)

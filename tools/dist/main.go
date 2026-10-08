@@ -94,19 +94,66 @@ func writeZip(w io.Writer, binName string, bin []byte, extras []file, mtime time
 	return zw.Close()
 }
 
+func fileSum(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
 func writeChecksums(dir string, names []string) error {
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
 	var b strings.Builder
 	for _, n := range sorted {
-		data, err := os.ReadFile(filepath.Join(dir, n))
+		sum, err := fileSum(filepath.Join(dir, n))
 		if err != nil {
 			return err
 		}
-		sum := sha256.Sum256(data)
-		fmt.Fprintf(&b, "%s  %s\n", hex.EncodeToString(sum[:]), n)
+		fmt.Fprintf(&b, "%s  %s\n", sum, n)
 	}
 	return os.WriteFile(filepath.Join(dir, "checksums.txt"), []byte(b.String()), 0o644)
+}
+
+const repo = "WellWells/agentswap"
+
+func writeFormula(w io.Writer, version string, sums map[target]string) error {
+	plain := strings.TrimPrefix(version, "v")
+	if plain == version || plain == "" || plain[0] < '0' || plain[0] > '9' {
+		return fmt.Errorf("formula needs a release version like v1.0.0, got %q", version)
+	}
+	var b strings.Builder
+	b.WriteString("class Agentswap < Formula\n")
+	b.WriteString("  desc \"Switch between multiple accounts of AI coding agents\"\n")
+	fmt.Fprintf(&b, "  homepage \"https://github.com/%s\"\n", repo)
+	fmt.Fprintf(&b, "  version \"%s\"\n", plain)
+	b.WriteString("  license \"MIT\"\n")
+	found := false
+	for _, p := range []struct{ goos, block string }{{"darwin", "on_macos"}, {"linux", "on_linux"}} {
+		var arches []string
+		for _, a := range []struct{ goarch, block string }{{"arm64", "on_arm"}, {"amd64", "on_intel"}} {
+			t := target{p.goos, a.goarch}
+			sum, ok := sums[t]
+			if !ok {
+				continue
+			}
+			arches = append(arches, fmt.Sprintf("    %s do\n      url \"https://github.com/%s/releases/download/%s/%s\"\n      sha256 \"%s\"\n    end\n", a.block, repo, version, t.archive(), sum))
+		}
+		if len(arches) == 0 {
+			continue
+		}
+		found = true
+		fmt.Fprintf(&b, "\n  %s do\n%s  end\n", p.block, strings.Join(arches, "\n"))
+	}
+	if !found {
+		return errors.New("formula needs a darwin or linux target")
+	}
+	b.WriteString("\n  def install\n    bin.install \"agentswap\"\n    system bin/\"agentswap\", \"link\"\n  end\n")
+	b.WriteString("\n  test do\n    assert_match version.to_s, shell_output(\"#{bin}/agentswap version\")\n  end\nend\n")
+	_, err := io.WriteString(w, b.String())
+	return err
 }
 
 func buildTime() time.Time {
@@ -129,6 +176,7 @@ func run() error {
 	version := flag.String("version", "dev", "version embedded in the binary")
 	out := flag.String("out", "dist", "output directory")
 	targetList := flag.String("targets", allTargets, "comma-separated GOOS/GOARCH list")
+	brew := flag.String("brew", "", "also write a Homebrew formula to this path")
 	flag.Parse()
 
 	if _, err := os.Stat("go.mod"); err != nil {
@@ -155,6 +203,7 @@ func run() error {
 
 	mtime := buildTime()
 	var produced []string
+	sums := map[target]string{}
 	for _, t := range targets {
 		binName := "agentswap"
 		if t.OS == "windows" {
@@ -184,6 +233,11 @@ func run() error {
 			return err
 		}
 		produced = append(produced, t.archive())
+		if t.OS != "windows" {
+			if sums[t], err = fileSum(filepath.Join(*out, t.archive())); err != nil {
+				return err
+			}
+		}
 		fmt.Printf("%-36s %6.1f MB\n", t.archive(), float64(len(bin))/1e6)
 	}
 	for _, name := range []string{"install.sh", "install.ps1"} {
@@ -196,7 +250,17 @@ func run() error {
 		}
 		produced = append(produced, name)
 	}
-	return writeChecksums(*out, produced)
+	if err := writeChecksums(*out, produced); err != nil {
+		return err
+	}
+	if *brew == "" {
+		return nil
+	}
+	var rb strings.Builder
+	if err := writeFormula(&rb, *version, sums); err != nil {
+		return err
+	}
+	return os.WriteFile(*brew, []byte(rb.String()), 0o644)
 }
 
 func main() {

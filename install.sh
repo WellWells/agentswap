@@ -41,10 +41,21 @@ fi
 tar -xzf "$tmp/$asset" -C "$tmp"
 mkdir -p "$dir"
 install -m 0755 "$tmp/agentswap" "$dir/agentswap"
+if [ "$os" = darwin ]; then
+  xattr -d com.apple.quarantine "$dir/agentswap" 2>/dev/null || true
+fi
 "$dir/agentswap" link
 
 echo "Installed agentswap to $dir"
 case ":$PATH:" in
   *":$dir:"*) ;;
-  *) echo "Add $dir to your PATH" ;;
+  *)
+    case "${SHELL##*/}" in
+      zsh) rc="$HOME/.zshrc" ;;
+      bash) rc="$HOME/.bashrc" ;;
+      *) rc="$HOME/.profile" ;;
+    esac
+    echo "Add $dir to your PATH:"
+    echo "  echo 'export PATH=\"$dir:\$PATH\"' >> $rc && . $rc"
+    ;;
 esac
