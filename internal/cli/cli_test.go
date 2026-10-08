@@ -30,6 +30,7 @@ type harness struct {
 	srv    *httptest.Server
 	now    time.Time
 	lang   ui.Lang
+	env    map[string]string
 	exe    string
 	exec   func(env []string, name string, args ...string) error
 	output func(env []string, name string, args ...string) ([]byte, error)
@@ -104,6 +105,9 @@ func (h *harness) run(args ...string) (int, string, string) {
 		Stdout: &out,
 		Stderr: &errb,
 		Getenv: func(k string) string {
+			if v, ok := h.env[k]; ok {
+				return v
+			}
 			return map[string]string{
 				"CODEX_REFRESH_TOKEN_URL_OVERRIDE": h.srv.URL + "/oauth/token",
 				"AGENTSWAP_CLAUDE_API_URL":         h.srv.URL,
@@ -819,5 +823,96 @@ func TestHelpIsSpecificToEachCommand(t *testing.T) {
 		if !strings.Contains(out, w) {
 			t.Errorf("zh: missing %q in\n%s", w, out)
 		}
+	}
+}
+
+func TestLangShowsCurrentAndChoices(t *testing.T) {
+	h := newHarness(t)
+	code, out, _ := h.run("agentswap", "lang")
+	if code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	for _, w := range []string{"Language: English (en), follows the system locale", "  1  en         English   ● active\n", "  2  zh-TW/zht  正體中文\n", "  3  zh-CN/zhc  简体中文\n", "agentswap lang <number|code>", "agentswap lang auto"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in\n%s", w, out)
+		}
+	}
+}
+
+func TestLangSetPersistsAndAuto(t *testing.T) {
+	h := newHarness(t)
+	code, out, _ := h.run("agentswap", "language", "zhc")
+	if code != 0 || !strings.Contains(out, "界面语言已设置为 简体中文（zh-CN）") {
+		t.Fatalf("code %d: %s", code, out)
+	}
+	b, _ := os.ReadFile(filepath.Join(h.home, ".agentswap", "config.json"))
+	if !strings.Contains(string(b), `"lang": "zh-CN"`) {
+		t.Fatalf("config: %s", b)
+	}
+	_, out, _ = h.run("cxswap", "list")
+	if !strings.Contains(out, "尚未保存任何 codex 账号") {
+		t.Errorf("saved language not used: %s", out)
+	}
+	_, out, _ = h.run("agentswap", "lang")
+	if !strings.Contains(out, "由 `agentswap lang` 设置") || !strings.Contains(out, "3  zh-CN/zhc  简体中文  ● 使用中") {
+		t.Errorf("show: %s", out)
+	}
+	h.lang = ui.ZhTW
+	code, out, _ = h.run("agentswap", "lang", "auto")
+	if code != 0 || !strings.Contains(out, "介面語言恢復跟隨系統語系：正體中文（zh-TW）") {
+		t.Fatalf("auto: code %d: %s", code, out)
+	}
+	_, out, _ = h.run("agentswap", "lang")
+	if !strings.Contains(out, "跟隨系統語系") {
+		t.Errorf("after auto: %s", out)
+	}
+}
+
+func TestLangSetByNumber(t *testing.T) {
+	h := newHarness(t)
+	for n, want := range map[string]string{"2": "介面語言已設為 正體中文（zh-TW）", "3": "界面语言已设置为 简体中文（zh-CN）", "1": "Language set to English (en)"} {
+		code, out, _ := h.run("agentswap", "lang", n)
+		if code != 0 || !strings.Contains(out, want) {
+			t.Errorf("lang %s: code %d: %s", n, code, out)
+		}
+	}
+}
+
+func TestLangEnvOverridesSaved(t *testing.T) {
+	h := newHarness(t)
+	h.run("agentswap", "lang", "zh-TW")
+	h.env = map[string]string{"AGENTSWAP_LANG": "en"}
+	_, out, _ := h.run("cxswap", "list")
+	if !strings.Contains(out, "No saved codex accounts") {
+		t.Errorf("env should win: %s", out)
+	}
+	_, out, _ = h.run("agentswap", "lang", "zh-CN")
+	if !strings.Contains(out, "AGENTSWAP_LANG=en") {
+		t.Errorf("missing override warning: %s", out)
+	}
+	_, out, _ = h.run("agentswap", "lang")
+	if !strings.Contains(out, "set by AGENTSWAP_LANG") {
+		t.Errorf("show: %s", out)
+	}
+	h.env = map[string]string{"AGENTSWAP_LANG": "fr"}
+	_, out, _ = h.run("cxswap", "list")
+	if !strings.Contains(out, "尚未保存任何 codex 账号") {
+		t.Errorf("invalid AGENTSWAP_LANG should not hide the saved language: %s", out)
+	}
+}
+
+func TestLangRejectsUnknownCode(t *testing.T) {
+	h := newHarness(t)
+	for _, args := range [][]string{{"zh-HK"}, {"zhs"}, {"0"}, {"4"}, {"en", "zh-TW"}} {
+		code, _, errOut := h.run(append([]string{"agentswap", "lang"}, args...)...)
+		if code != 2 || errOut == "" {
+			t.Errorf("%v: code %d err %q", args, code, errOut)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(h.home, ".agentswap", "config.json")); err == nil {
+		t.Error("config written for an invalid code")
+	}
+	if code, _, _ := h.run("cxswap", "lang", "en"); code == 0 {
+		t.Error("lang should only be an agentswap command")
 	}
 }

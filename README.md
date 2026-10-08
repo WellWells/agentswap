@@ -66,6 +66,10 @@ ccswap 2               # switch; running sessions follow on their next request
 
 Sign in to other accounts with Claude Code itself (`/login`), then run `ccswap add`. `CLAUDE_CONFIG_DIR` is respected, MCP and plugin tokens in `.credentials.json` stay with the machine, and only `oauthAccount` in `.claude.json` is replaced. On macOS the credentials are read from and written to the Keychain. Only Claude subscription logins are supported. After `ccswap import`, stop using cswap and run `cswap purge`: its files are only base64.
 
+### Language
+
+Messages follow the system language (English when it is not supported). `agentswap lang` lists the languages with numbers: `1` `en`, `2` `zh-TW`/`zht`, `3` `zh-CN`/`zhc`. `agentswap lang 2` or `agentswap lang zht` sets one, `agentswap lang auto` follows the system again, and `AGENTSWAP_LANG` overrides both.
+
 ### Storage
 
 Saved accounts live in `~/.agentswap/` (override with `AGENTSWAP_HOME`) and are encrypted for the current user on the current machine: DPAPI on Windows, a key in the Keychain on macOS, and a key in the Secret Service on Linux (falling back to a key file bound to `/etc/machine-id`, with a warning). A copy of `~/.agentswap` cannot be decrypted on another computer.

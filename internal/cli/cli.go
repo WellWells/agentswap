@@ -46,6 +46,8 @@ type Env struct {
 	GOOS    string
 	Run     execx.Runner
 	Vault   vault.Vault
+
+	autoLang ui.Lang
 }
 
 func (e Env) goos() string {
@@ -156,6 +158,7 @@ func Run(e Env) int {
 	prog := strings.ToLower(filepath.Base(strings.ReplaceAll(e.Args[0], `\`, "/")))
 	prog = strings.TrimSuffix(prog, ".exe")
 	args := e.Args[1:]
+	e = e.applySavedLang()
 	name, ok := lookup(prog)
 	if !ok {
 		switch {
@@ -171,6 +174,8 @@ func Run(e Env) int {
 			return e.report("agentswap", provider{}, link(e))
 		case args[0] == "unlink":
 			return e.report("agentswap", provider{}, unlink(e))
+		case args[0] == "lang" || args[0] == "language":
+			return e.report("agentswap", provider{}, language(e, args[1:]))
 		}
 		if name, ok = lookup(strings.ToLower(args[0])); !ok {
 			fmt.Fprintln(e.Stderr, e.Lang.T("unknownProvider", args[0]))
