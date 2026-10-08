@@ -5,23 +5,91 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version: stable
+      - run: go vet ./...
       - run: go test ./...
-      - env:
-          GOPROXY: 'off'
-          GOFLAGS: -mod=mod
-        run: |
-          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          go run ./tools/dist -version "${GITHUB_REF_NAME}"
+
+  verify:
+    needs: test
+    uses: ./.github/workflows/verify.yml
+    with:
+      version: ${{ github.ref_name }}
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag
+          GH_REPO: ${{ github.repository }}
+        run: |
+          pre=""
+          case "${GITHUB_REF_NAME}" in *-*) pre="--prerelease" ;; esac
+          gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag $pre
+
+  smoke:
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      AGENTSWAP_VERSION: ${{ github.ref_name }}
+    steps:
+      - if: runner.os != 'Windows'
+        run: |
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/install.sh" | sh
+          "$HOME/.local/bin/cxswap" version | grep -F "${GITHUB_REF_NAME}"
+      - if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          irm "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/install.ps1" | iex
+          $out = cxswap version | Out-String
+          if ($out -notmatch [regex]::Escape($env:GITHUB_REF_NAME)) { throw "unexpected version: $out" }
+
+  homebrew:
+    needs: smoke
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: formula
+      - env:
+          TAP_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          if [ -z "$TAP_KEY" ]; then
+            echo "::warning::HOMEBREW_TAP_DEPLOY_KEY is not set; the Homebrew tap was not updated"
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_KEY" > ~/.ssh/homebrew_tap
+          chmod 600 ~/.ssh/homebrew_tap
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/homebrew_tap -o IdentitiesOnly=yes"
+          git clone git@github.com:WellWells/homebrew-tap.git tap
+          mkdir -p tap/Formula
+          cp agentswap.rb tap/Formula/agentswap.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/agentswap.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "agentswap ${GITHUB_REF_NAME#v}"
+          git push

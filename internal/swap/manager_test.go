@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -323,10 +324,13 @@ func TestAliasErrorsAreTyped(t *testing.T) {
 
 type usageRecorder struct {
 	*fakeProvider
+	mu     sync.Mutex
 	active map[string]bool
 }
 
 func (u *usageRecorder) Usage(ctx context.Context, snap []byte, active bool) (Usage, []byte, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	u.active[string(snap)] = active
 	return Usage{}, nil, nil
 }

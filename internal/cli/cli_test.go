@@ -63,7 +63,7 @@ func (h *harness) Stop(ps []procs.Proc) error {
 
 func newHarness(t *testing.T) *harness {
 	home := t.TempDir()
-	h := &harness{t: t, home: home, codex: filepath.Join(home, ".codex"), usage: map[string]string{}, claude: map[string]string{}, agyUsage: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour)}
+	h := &harness{t: t, home: home, codex: filepath.Join(home, ".codex"), usage: map[string]string{}, claude: map[string]string{}, agyUsage: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour).In(time.FixedZone("", 8*3600))}
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v1internal:") {
 			body, ok := h.agyUsage[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
@@ -432,7 +432,7 @@ func TestSuggestsAccountWithMoreHeadroom(t *testing.T) {
 func TestListTreatsElapsedWindowAsZero(t *testing.T) {
 	h := newHarness(t)
 	h.usage["at-u1"] = plusUsage
-	h.now = time.Unix(1791436850, 0).Add(time.Minute)
+	h.now = h.now.Add(time.Hour + time.Minute)
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
 	_, out, _ := h.run("cxswap", "status")
