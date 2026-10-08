@@ -272,7 +272,11 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 	case cmd == "list" || cmd == "ls":
 		return list(e, prog, p, m)
 	case cmd == "status" || cmd == "current":
-		return status(e, prog, p, m)
+		q := ""
+		if len(args) > 0 {
+			q = args[0]
+		}
+		return status(e, prog, p, m, q)
 	case cmd == "add":
 		alias := ""
 		if len(args) > 0 {
@@ -550,7 +554,22 @@ func list(e Env, prog string, p provider, m *swap.Manager) error {
 	return nil
 }
 
-func status(e Env, prog string, p provider, m *swap.Manager) error {
+func status(e Env, prog string, p provider, m *swap.Manager, q string) error {
+	if q != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), usageTimeout)
+		defer cancel()
+		st, usage, err := m.UsageOf(ctx, q)
+		if err != nil {
+			return withQuery(q, err)
+		}
+		r := st.Registry
+		i, _ := r.Find(q)
+		a := r.Accounts[i]
+		c := ui.Card{Provider: p.display, Number: i + 1, Alias: a.Alias, Email: a.Email, Plan: a.Plan, Active: a.Key == r.Active}
+		fill(&c, usage[a.Key])
+		ui.Render(e.Stdout, []ui.Card{c}, e.options())
+		return nil
+	}
 	cards, err := e.cards(prog, p, m, true)
 	if err != nil {
 		return err

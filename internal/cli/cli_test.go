@@ -751,3 +751,24 @@ func TestImportOnlyForClaude(t *testing.T) {
 		t.Fatalf("code %d", code)
 	}
 }
+
+func TestStatusShowsOneAccount(t *testing.T) {
+	h := newHarness(t)
+	setupTwo(t, h)
+	code, out, errs := h.run("cxswap", "status", "1")
+	if code != 0 || !strings.Contains(out, "Codex · #1 <alice@x.com>") || strings.Contains(out, "bob@x.com") {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	code, out, _ = h.run("cxswap", "status", "bob")
+	if code != 0 || !strings.Contains(out, "#2 <bob@x.com> · prolite  ● active") || strings.Contains(out, "alice") {
+		t.Fatalf("%d %q", code, out)
+	}
+	code, out, _ = h.run("cxswap", "status")
+	if code != 0 || !strings.Contains(out, "alice") || !strings.Contains(out, "bob") {
+		t.Fatalf("all %d %q", code, out)
+	}
+	code, _, errs = h.run("cxswap", "status", "9")
+	if code != 1 || !strings.Contains(errs, "no account #9") {
+		t.Fatalf("missing %d %q", code, errs)
+	}
+}
