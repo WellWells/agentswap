@@ -20,6 +20,11 @@ func systemZone() string {
 	return ""
 }
 
+func IsTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
 func Terminal(f *os.File) (bool, int) {
 	st, err := f.Stat()
 	if err != nil || st.Mode()&os.ModeCharDevice == 0 {

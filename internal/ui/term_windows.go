@@ -18,6 +18,11 @@ const enableVirtualTerminalProcessing = 0x4
 
 func systemZone() string { return "" }
 
+func IsTerminal(f *os.File) bool {
+	var mode uint32
+	return syscall.GetConsoleMode(syscall.Handle(f.Fd()), &mode) == nil
+}
+
 func Terminal(f *os.File) (bool, int) {
 	h := syscall.Handle(f.Fd())
 	var mode uint32
