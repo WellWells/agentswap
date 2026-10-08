@@ -65,6 +65,11 @@ func (l *dirLock) release() {
 }
 
 func (p Provider) LockLive() (func(), error) {
+	if p.Keychain == nil {
+		if _, err := os.Stat(p.ConfigDir); errors.Is(err, fs.ErrNotExist) {
+			return func() {}, nil
+		}
+	}
 	wait := p.LockWait
 	if wait == 0 {
 		wait = 9 * time.Second

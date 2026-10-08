@@ -10,6 +10,7 @@ import (
 
 func TestLockLiveCreatesAndRemovesClaudeLocks(t *testing.T) {
 	p, home := setup(t)
+	os.MkdirAll(p.ConfigDir, 0o700)
 	p.LockWait = 200 * time.Millisecond
 	unlock, err := p.LockLive()
 	if err != nil {
@@ -31,6 +32,7 @@ func TestLockLiveCreatesAndRemovesClaudeLocks(t *testing.T) {
 
 func TestLockLiveWaitsForHeldLockAndTakesOverStale(t *testing.T) {
 	p, home := setup(t)
+	os.MkdirAll(p.ConfigDir, 0o700)
 	p.LockWait = 200 * time.Millisecond
 	held := filepath.Join(home, ".claude.json.lock")
 	os.MkdirAll(held, 0o700)
@@ -47,4 +49,16 @@ func TestLockLiveWaitsForHeldLockAndTakesOverStale(t *testing.T) {
 		t.Fatalf("stale takeover: %v", err)
 	}
 	unlock()
+}
+
+func TestLockLiveDoesNotCreateClaudeDirForCodexOnlyUsers(t *testing.T) {
+	p, home := setup(t)
+	unlock, err := p.LockLive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
+		t.Fatal("~/.claude created")
+	}
 }
