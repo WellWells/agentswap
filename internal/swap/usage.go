@@ -66,6 +66,9 @@ func (m *Manager) Usage(ctx context.Context, all bool) (Status, map[string]Usage
 				}
 				jobs = append(jobs, usageJob{a.Key, snap, l.ok() && a.Key == l.id.Key})
 			}
+			if l.ok() && r.Index(l.id.Key) < 0 {
+				jobs = append(jobs, usageJob{l.id.Key, l.raw, true})
+			}
 		}
 		refreshed := make([][]byte, len(jobs))
 		out := make([]UsageResult, len(jobs))

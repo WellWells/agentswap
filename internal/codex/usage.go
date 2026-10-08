@@ -140,6 +140,9 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 		}
 		u, err = p.fetchWithRetry(ctx, c)
 	}
+	if errors.As(err, &he) && he == http.StatusUnauthorized {
+		return swap.Usage{}, refreshed, ErrLoginExpired
+	}
 	if err != nil {
 		if su, ok := p.sessionUsage(c.user, c.account); ok {
 			return su, refreshed, nil

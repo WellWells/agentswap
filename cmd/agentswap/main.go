@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 
@@ -47,5 +48,20 @@ func main() {
 		Color:   color,
 		Width:   width,
 		Zone:    ui.DetectZone(os.Getenv),
+		Exec:    run,
+		Output:  output,
 	}))
+}
+
+func run(env []string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+func output(env []string, name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Env = append(os.Environ(), env...)
+	return cmd.CombinedOutput()
 }

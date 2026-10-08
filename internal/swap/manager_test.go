@@ -231,3 +231,30 @@ func TestSwitchSavesUnsavedLiveAccountFirst(t *testing.T) {
 		t.Fatalf("unsaved live account lost: %+v", r)
 	}
 }
+
+func TestImportSavesWithoutTouchingLive(t *testing.T) {
+	m, f := newManager(t)
+	addAccount(t, m, f, "a|alice@x.com|1", "")
+	a, err := m.Import([]byte("b|bob@x.com|1"), "work")
+	if err != nil || a.Key != "b" || a.Alias != "work" {
+		t.Fatalf("%+v %v", a, err)
+	}
+	if string(f.live) != "a|alice@x.com|1" || f.writes != 0 {
+		t.Fatalf("live touched: %q writes=%d", f.live, f.writes)
+	}
+	st, _ := m.Status()
+	if st.Registry.Active != "a" || len(st.Registry.Accounts) != 2 || snapshot(t, m, "b") != "b|bob@x.com|1" {
+		t.Fatalf("%+v", st.Registry)
+	}
+}
+
+func TestImportOfLiveAccountAlsoRefreshesLive(t *testing.T) {
+	m, f := newManager(t)
+	addAccount(t, m, f, "a|alice@x.com|old", "")
+	if _, err := m.Import([]byte("a|alice@x.com|new"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if string(f.live) != "a|alice@x.com|new" || snapshot(t, m, "a") != "a|alice@x.com|new" {
+		t.Fatalf("live=%q snap=%q", f.live, snapshot(t, m, "a"))
+	}
+}
