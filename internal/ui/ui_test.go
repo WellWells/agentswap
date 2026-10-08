@@ -259,3 +259,33 @@ func TestStateFromError(t *testing.T) {
 		t.Errorf("other: %v %q", s, d)
 	}
 }
+
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		if r >= 0x1100 && (r <= 0x115f || (r >= 0x2e80 && r <= 0xa4cf) || (r >= 0xac00 && r <= 0xd7a3) || (r >= 0xf900 && r <= 0xfaff) || (r >= 0xfe30 && r <= 0xfe4f) || (r >= 0xff00 && r <= 0xff60)) {
+			w += 2
+		} else {
+			w++
+		}
+	}
+	return w
+}
+
+func TestUsageColumnsAligned(t *testing.T) {
+	for _, l := range []Lang{En, ZhTW} {
+		col := -1
+		for _, line := range strings.Split(l.T("usage", "cxswap"), "\n") {
+			if !strings.HasPrefix(line, "  cxswap") || strings.HasSuffix(line, "version") {
+				continue
+			}
+			i := strings.LastIndex(line, "  ")
+			w := displayWidth(line[:i+2])
+			if col == -1 {
+				col = w
+			} else if w != col {
+				t.Errorf("lang %d: %q starts at column %d, want %d", l, line, w, col)
+			}
+		}
+	}
+}

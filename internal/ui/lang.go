@@ -86,13 +86,13 @@ var messages = map[string][2]string{
 Commands: agentswap (all agents), agentswap <codex|claude> ..., cxswap/codexswap, ccswap/claudeswap
 Language: set AGENTSWAP_LANG=en or zh-TW
 `, `用法：
-  %[1]s                    列出所有已儲存帳號與用量
-  %[1]s add [別名]         儲存目前登入的帳號
-  %[1]s <編號|別名|email>  切換帳號（也可用 switch <查詢>）
-  %[1]s -                  切回上一個帳號
-  %[1]s status             顯示目前使用中的帳號
-  %[1]s alias <查詢> [名稱] 設定或清除別名
-  %[1]s rm <查詢>          移除已儲存的帳號
+  %[1]s                      列出所有已儲存帳號與用量
+  %[1]s add [別名]           儲存目前登入的帳號
+  %[1]s <編號|別名|email>    切換帳號（也可用 switch <查詢>）
+  %[1]s -                    切回上一個帳號
+  %[1]s status               顯示目前使用中的帳號
+  %[1]s alias <查詢> [名稱]  設定或清除別名
+  %[1]s rm <查詢>            移除已儲存的帳號
   %[1]s version
 
 指令：agentswap（所有 agent）、agentswap <codex|claude> ...、cxswap/codexswap、ccswap/claudeswap
