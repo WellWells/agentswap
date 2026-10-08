@@ -308,3 +308,15 @@ func TestUsageReleasesLiveLockBeforeFn(t *testing.T) {
 		t.Fatalf("events %s", got)
 	}
 }
+
+func TestAliasErrorsAreTyped(t *testing.T) {
+	m, f := newManager(t)
+	addAccount(t, m, f, "k1|a@x|1", "")
+	addAccount(t, m, f, "k2|b@x|1", "work")
+	if err := m.SetAlias("1", "work"); !errors.Is(err, ErrAlias) || !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("dup: %v", err)
+	}
+	if err := m.SetAlias("1", "12"); !errors.Is(err, ErrAlias) {
+		t.Fatalf("number: %v", err)
+	}
+}

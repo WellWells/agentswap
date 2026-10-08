@@ -259,13 +259,20 @@ func (m *Manager) SetAlias(q, alias string) error {
 	})
 }
 
+var ErrAlias = errors.New("invalid alias")
+
+type aliasError string
+
+func (a aliasError) Error() string { return string(a) }
+func (a aliasError) Unwrap() error { return ErrAlias }
+
 func validAlias(r *store.Registry, alias, key string) error {
 	if _, err := strconv.Atoi(alias); err == nil || alias == "-" || strings.ContainsAny(alias, " \t") {
-		return fmt.Errorf("invalid alias %q", alias)
+		return aliasError(fmt.Sprintf("invalid alias %q", alias))
 	}
 	for _, a := range r.Accounts {
 		if a.Key != key && strings.EqualFold(a.Alias, alias) {
-			return fmt.Errorf("alias %q is already used by %s", alias, a.Email)
+			return aliasError(fmt.Sprintf("alias %q is already used by %s", alias, a.Email))
 		}
 	}
 	return nil
