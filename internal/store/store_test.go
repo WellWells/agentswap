@@ -1,10 +1,13 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/WellWells/agentswap/internal/vault"
 )
 
 func sample() *Registry {
@@ -123,5 +126,68 @@ func TestBackupKeepsNewest(t *testing.T) {
 	newest, _ := os.ReadFile(filepath.Join(s.Dir, "backups", entries[len(entries)-1].Name()))
 	if string(newest) != "g" {
 		t.Fatalf("newest backup %q", newest)
+	}
+}
+
+func sealedStore(t *testing.T) Store {
+	return Store{Dir: t.TempDir(), Vault: vault.WithKey(bytes.Repeat([]byte{3}, 32))}
+}
+
+func TestSnapshotsAndBackupsAreSealed(t *testing.T) {
+	s := sealedStore(t)
+	if err := s.WriteSnapshot("k", []byte(`{"rt":"secret"}`)); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(s.snapshotPath("k"))
+	if !vault.Sealed(raw) || bytes.Contains(raw, []byte("secret")) {
+		t.Fatalf("snapshot not sealed: %q", raw)
+	}
+	got, err := s.ReadSnapshot("k")
+	if err != nil || string(got) != `{"rt":"secret"}` {
+		t.Fatalf("read %q %v", got, err)
+	}
+	if err := s.Backup("codex-live", []byte("secret"), 5); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(s.Dir, "backups"))
+	b, _ := os.ReadFile(filepath.Join(s.Dir, "backups", entries[0].Name()))
+	if !vault.Sealed(b) {
+		t.Fatal("backup not sealed")
+	}
+}
+
+func TestMigrateSealsLegacyFiles(t *testing.T) {
+	s := sealedStore(t)
+	plain := Store{Dir: s.Dir}
+	plain.WriteSnapshot("k", []byte(`{"legacy":true}`))
+	plain.Backup("codex-live", []byte(`{"old":1}`), 5)
+	if err := s.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(s.snapshotPath("k"))
+	if !vault.Sealed(raw) {
+		t.Fatal("snapshot still plaintext")
+	}
+	if got, _ := s.ReadSnapshot("k"); string(got) != `{"legacy":true}` {
+		t.Fatalf("content changed: %q", got)
+	}
+	entries, _ := os.ReadDir(filepath.Join(s.Dir, "backups"))
+	b, _ := os.ReadFile(filepath.Join(s.Dir, "backups", entries[0].Name()))
+	if !vault.Sealed(b) {
+		t.Fatal("backup still plaintext")
+	}
+	if err := s.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrateWithoutVaultIsNoop(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	s.WriteSnapshot("k", []byte("x"))
+	if err := s.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(s.snapshotPath("k")); string(raw) != "x" {
+		t.Fatal("changed without vault")
 	}
 }

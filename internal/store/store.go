@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/WellWells/agentswap/internal/fsx"
+	"github.com/WellWells/agentswap/internal/vault"
 )
 
 const Version = 1
@@ -113,7 +114,17 @@ func (r *Registry) Find(q string) (int, error) {
 	return found, nil
 }
 
-type Store struct{ Dir string }
+type Store struct {
+	Dir   string
+	Vault vault.Vault
+}
+
+func (s Store) seal(b []byte) ([]byte, error) {
+	if s.Vault == nil {
+		return b, nil
+	}
+	return s.Vault.Seal(b)
+}
 
 func (s Store) registryPath() string { return filepath.Join(s.Dir, "registry.json") }
 
@@ -154,10 +165,57 @@ func (s Store) snapshotPath(key string) string {
 	return filepath.Join(s.Dir, "accounts", hex.EncodeToString(sum[:12])+".json")
 }
 
-func (s Store) ReadSnapshot(key string) ([]byte, error) { return os.ReadFile(s.snapshotPath(key)) }
+func (s Store) ReadSnapshot(key string) ([]byte, error) {
+	b, err := os.ReadFile(s.snapshotPath(key))
+	if err != nil || s.Vault == nil {
+		return b, err
+	}
+	return s.Vault.Open(b)
+}
 
 func (s Store) WriteSnapshot(key string, data []byte) error {
-	return fsx.WriteAtomic(s.snapshotPath(key), data, 0o600)
+	b, err := s.seal(data)
+	if err != nil {
+		return err
+	}
+	return fsx.WriteAtomic(s.snapshotPath(key), b, 0o600)
+}
+
+func (s Store) Migrate() error {
+	if s.Vault == nil {
+		return nil
+	}
+	for _, sub := range []string{"accounts", "backups"} {
+		dir := filepath.Join(s.Dir, sub)
+		entries, err := os.ReadDir(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if !e.Type().IsRegular() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			p := filepath.Join(dir, e.Name())
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			if vault.Sealed(b) {
+				continue
+			}
+			sealed, err := s.Vault.Seal(b)
+			if err != nil {
+				return err
+			}
+			if err := fsx.WriteAtomic(p, sealed, 0o600); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s Store) DeleteSnapshot(key string) error {
@@ -169,6 +227,10 @@ func (s Store) DeleteSnapshot(key string) error {
 }
 
 func (s Store) Backup(prefix string, data []byte, keep int) error {
+	data, err := s.seal(data)
+	if err != nil {
+		return err
+	}
 	dir := filepath.Join(s.Dir, "backups")
 	ts := time.Now().UTC().Format("20060102T150405.000000000")
 	var p string
