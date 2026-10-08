@@ -28,12 +28,22 @@ type Provider struct {
 	Home       string
 	BaseURL    string
 	RefreshURL string
-	UserAgent  string
+	UserAgent  func() string
 	Client     *http.Client
 	Now        func() time.Time
 }
 
+const Originator = "codex_cli_rs"
+
 func (p Provider) Name() string { return "codex" }
+
+func (p Provider) identify(req *http.Request) {
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Originator", Originator)
+	if p.UserAgent != nil {
+		req.Header.Set("User-Agent", p.UserAgent())
+	}
+}
 
 func (p Provider) AuthPath() string { return filepath.Join(p.Home, "auth.json") }
 

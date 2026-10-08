@@ -207,8 +207,7 @@ func (p Provider) fetchUsage(ctx context.Context, c creds) (swap.Usage, error) {
 		return swap.Usage{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.access)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", p.UserAgent)
+	p.identify(req)
 	if c.account != "" {
 		req.Header.Set("ChatGPT-Account-ID", c.account)
 	}
@@ -253,8 +252,7 @@ func (p Provider) refreshTokens(ctx context.Context, snap []byte, refreshToken s
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", p.UserAgent)
+	p.identify(req)
 	resp, err := p.client().Do(req)
 	if err != nil {
 		return nil, err

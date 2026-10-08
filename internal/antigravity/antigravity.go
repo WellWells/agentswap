@@ -33,7 +33,7 @@ type Provider struct {
 	Running    func() (bool, error)
 	BaseURL    string
 	RefreshURL string
-	UserAgent  string
+	UserAgent  func(authMethod string) string
 	Client     *http.Client
 	Now        func() time.Time
 }
@@ -76,8 +76,9 @@ type token struct {
 }
 
 type creds struct {
-	Token   token  `json:"token"`
-	IDToken string `json:"id_token"`
+	Token      token  `json:"token"`
+	IDToken    string `json:"id_token"`
+	AuthMethod string `json:"auth_method"`
 }
 
 func parse(b []byte) (creds, error) {

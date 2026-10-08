@@ -88,7 +88,7 @@ func (a *api) server(t *testing.T) *httptest.Server {
 
 func usageProvider(t *testing.T, a *api) Provider {
 	s := a.server(t)
-	return Provider{BaseURL: s.URL, RefreshURL: s.URL + "/token", UserAgent: "agentswap/test", Now: func() time.Time { return testNow }}
+	return Provider{BaseURL: s.URL, RefreshURL: s.URL + "/token", UserAgent: func(m string) string { return "antigravity/cli/9.9.9 (aidev_client; auth_method=" + m + ")" }, Now: func() time.Time { return testNow }}
 }
 
 func TestUsageParsesQuota(t *testing.T) {
@@ -120,7 +120,7 @@ func TestUsageParsesQuota(t *testing.T) {
 	if len(a.projects) != 1 || a.projects[0] != "proj-1" {
 		t.Fatalf("projects %v", a.projects)
 	}
-	if a.agents[0] != "agentswap/test (antigravity)" {
+	if a.agents[0] != "antigravity/cli/9.9.9 (aidev_client; auth_method=consumer)" {
 		t.Fatalf("agent %q", a.agents[0])
 	}
 }

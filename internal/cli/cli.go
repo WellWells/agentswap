@@ -22,6 +22,7 @@ import (
 	"github.com/WellWells/agentswap/internal/execx"
 	"github.com/WellWells/agentswap/internal/fsx"
 	"github.com/WellWells/agentswap/internal/links"
+	"github.com/WellWells/agentswap/internal/official"
 	"github.com/WellWells/agentswap/internal/store"
 	"github.com/WellWells/agentswap/internal/swap"
 	"github.com/WellWells/agentswap/internal/ui"
@@ -47,8 +48,16 @@ type Env struct {
 	GOOS    string
 	Run     execx.Runner
 	Vault   vault.Vault
+	Clients *official.Detector
 
 	autoLang ui.Lang
+}
+
+func (e Env) clients() *official.Detector {
+	if e.Clients != nil {
+		return e.Clients
+	}
+	return &official.Detector{GOOS: e.goos(), GOARCH: runtime.GOARCH, Getenv: e.Getenv, Run: e.Run}
 }
 
 func (e Env) goos() string {
@@ -106,17 +115,17 @@ var providers = map[string]provider{
 		return codex.Provider{
 			Home:       e.dir("CODEX_HOME", ".codex"),
 			RefreshURL: e.Getenv("CODEX_REFRESH_TOKEN_URL_OVERRIDE"),
-			UserAgent:  "agentswap/" + e.Version,
+			UserAgent:  e.clients().Codex,
 		}
 	}},
 	"claude": {name: "claude", display: "Claude Code", supported: true, login: "claude auth login", official: "loginOfficial", hint: "hintClaude", usage: "usageClaude", empty: "emptyClaude", addMore: "listAddMoreClaude", open: func(e Env) swap.Provider {
 		p := claude.New(e.Getenv, e.Home, e.goos(), e.Run)
-		p.UserAgent = "agentswap/" + e.Version
+		p.UserAgent = e.clients().Claude
 		return p
 	}},
 	"antigravity": {name: "antigravity", display: "Antigravity", supported: true, login: "agy", official: "loginAgy", hint: "hintAntigravity", usage: "usageAntigravity", empty: "emptyAntigravity", addMore: "listAddMoreAntigravity", open: func(e Env) swap.Provider {
 		p := antigravity.New(e.Getenv, e.goos(), e.Run)
-		p.UserAgent = "agentswap/" + e.Version
+		p.UserAgent = e.clients().Agy
 		return p
 	}},
 }
@@ -168,6 +177,10 @@ func Run(e Env) int {
 	prog = strings.TrimSuffix(prog, ".exe")
 	args := e.Args[1:]
 	e = e.applySavedLang()
+	if e.Clients == nil {
+		e.Clients = e.clients()
+		e.Clients.Cache = filepath.Join(e.dir("AGENTSWAP_HOME", ".agentswap"), "clients.json")
+	}
 	name, ok := lookup(prog)
 	if !ok {
 		switch {

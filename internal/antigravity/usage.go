@@ -58,9 +58,13 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 		return swap.Usage{}, nil, err
 	}
 	access := c.Token.AccessToken
+	ua := ""
+	if p.UserAgent != nil {
+		ua = p.UserAgent(c.AuthMethod)
+	}
 	var refreshed []byte
 	renew := func() error {
-		b, err := p.refresh(ctx, snap, c.Token.RefreshToken)
+		b, err := p.refresh(ctx, ua, snap, c.Token.RefreshToken)
 		if err != nil {
 			return err
 		}
@@ -76,14 +80,14 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 			return swap.Usage{}, nil, err
 		}
 	}
-	u, err := p.fetchWithRetry(ctx, access)
+	u, err := p.fetchWithRetry(ctx, ua, access)
 	var he httpError
 	if errors.As(err, &he) && he == http.StatusUnauthorized {
 		if refreshed == nil && c.Token.RefreshToken != "" {
 			if rerr := renew(); rerr != nil {
 				return swap.Usage{}, nil, rerr
 			}
-			u, err = p.fetchWithRetry(ctx, access)
+			u, err = p.fetchWithRetry(ctx, ua, access)
 		}
 		if errors.As(err, &he) && he == http.StatusUnauthorized {
 			err = ErrLoginExpired
@@ -95,8 +99,8 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 	return u, refreshed, err
 }
 
-func (p Provider) fetchWithRetry(ctx context.Context, access string) (swap.Usage, error) {
-	u, err := p.fetchUsage(ctx, access)
+func (p Provider) fetchWithRetry(ctx context.Context, ua, access string) (swap.Usage, error) {
+	u, err := p.fetchUsage(ctx, ua, access)
 	if !transient(err) {
 		return u, err
 	}
@@ -105,7 +109,7 @@ func (p Provider) fetchWithRetry(ctx context.Context, access string) (swap.Usage
 		return u, err
 	case <-time.After(300 * time.Millisecond):
 	}
-	return p.fetchUsage(ctx, access)
+	return p.fetchUsage(ctx, ua, access)
 }
 
 func transient(err error) bool {
@@ -120,7 +124,7 @@ func transient(err error) bool {
 	return errors.As(err, &ue)
 }
 
-func (p Provider) call(ctx context.Context, access, method string, body, out any) error {
+func (p Provider) call(ctx context.Context, ua, access, method string, body, out any) error {
 	base := p.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
@@ -132,8 +136,7 @@ func (p Provider) call(ctx context.Context, access, method string, body, out any
 	}
 	req.Header.Set("Authorization", "Bearer "+access)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", strings.TrimSpace(p.UserAgent+" (antigravity)"))
+	req.Header.Set("User-Agent", ua)
 	resp, err := p.client().Do(req)
 	if err != nil {
 		return err
@@ -208,13 +211,13 @@ func groupLabel(name string) string {
 	return name
 }
 
-func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, error) {
+func (p Provider) fetchUsage(ctx context.Context, ua, access string) (swap.Usage, error) {
 	var lr struct {
 		Project     json.RawMessage `json:"cloudaicompanionProject"`
 		CurrentTier *tier           `json:"currentTier"`
 		PaidTier    *tier           `json:"paidTier"`
 	}
-	if err := p.call(ctx, access, "loadCodeAssist", map[string]any{"metadata": map[string]string{"ideType": "ANTIGRAVITY"}}, &lr); err != nil {
+	if err := p.call(ctx, ua, access, "loadCodeAssist", map[string]any{"metadata": map[string]string{"ideType": "ANTIGRAVITY"}}, &lr); err != nil {
 		return swap.Usage{}, err
 	}
 	body := map[string]string{}
@@ -234,7 +237,7 @@ func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, er
 			} `json:"buckets"`
 		} `json:"groups"`
 	}
-	if err := p.call(ctx, access, "retrieveUserQuotaSummary", body, &qs); err != nil {
+	if err := p.call(ctx, ua, access, "retrieveUserQuotaSummary", body, &qs); err != nil {
 		return swap.Usage{}, err
 	}
 	u := swap.Usage{Plan: lr.PaidTier.label(), At: p.now(), Live: true}
@@ -263,7 +266,7 @@ func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, er
 	return u, nil
 }
 
-func (p Provider) refresh(ctx context.Context, snap []byte, refreshToken string) ([]byte, error) {
+func (p Provider) refresh(ctx context.Context, ua string, snap []byte, refreshToken string) ([]byte, error) {
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
@@ -279,8 +282,7 @@ func (p Provider) refresh(ctx context.Context, snap []byte, refreshToken string)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", p.UserAgent)
+	req.Header.Set("User-Agent", ua)
 	resp, err := p.client().Do(req)
 	if err != nil {
 		return nil, err
