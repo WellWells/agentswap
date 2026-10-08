@@ -42,7 +42,7 @@ func (k Keychain) Read() ([]byte, error) {
 }
 
 func quote(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\`, `"`, `\"`).Replace(s) + `"`
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 func (k Keychain) Write(b []byte) error {

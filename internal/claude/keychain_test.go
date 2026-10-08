@@ -70,6 +70,12 @@ func TestKeychainReadWrite(t *testing.T) {
 	}
 }
 
+func TestQuoteEscapesBackslashAndQuote(t *testing.T) {
+	if got := quote(`dom\user "x"`); got != `"dom\\user \"x\""` {
+		t.Fatalf("%s", got)
+	}
+}
+
 func TestKeychainServiceSuffix(t *testing.T) {
 	env := map[string]string{"CLAUDE_CONFIG_DIR": "/Users/w/.claude-alt"}
 	got := keychainService(func(k string) string { return env[k] })
