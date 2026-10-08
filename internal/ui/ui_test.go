@@ -251,11 +251,11 @@ func TestRenderTable(t *testing.T) {
 	var buf bytes.Buffer
 	Render(&buf, cards, Options{Lang: En, Width: 140, Now: now})
 	body := []string{
-		"Account                         Weekly limit                  5-hour limit",
-		"#1 main <jora@x.com> · prolite  ██████▏░  76%  Oct 14 5:41pm  —                      ● active",
-		"#2 work <boss@x.com> · plus     ▊░░░░░░░  10%  Oct 15 9:12am  ███▍░░░░  42%  1:20pm  ★ suggested: cxswap 2",
+		"Account                         5-hour limit           Weekly limit",
+		"#1 main <jora@x.com> · prolite  —                      ██████▏░  76%  Oct 14 5:41pm  ● active",
+		"#2 work <boss@x.com> · plus     ███▍░░░░  42%  1:20pm  ▊░░░░░░░  10%  Oct 15 9:12am  ★ suggested: cxswap 2",
 		"#3 <old@x.com>                  Login expired, log in to this account again",
-		"#4 <cache@x.com>                —                             ▍░░░░░░░   5%          From local session log · 3h ago",
+		"#4 <cache@x.com>                ▍░░░░░░░   5%          —                             From local session log · 3h ago",
 		"#5 <key@x.com>                  No usage data for API key logins",
 		"#6 <down@x.com>                 Usage unavailable (HTTP 500)",
 	}
@@ -266,6 +266,45 @@ func TestRenderTable(t *testing.T) {
 	want := "Codex " + strings.Repeat("─", width-6) + "\n" + strings.Join(body, "\n") + "\n" + strings.Repeat("─", width) + "\nTimes show when each limit resets (UTC+8)\n"
 	if buf.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", buf.String(), want)
+	}
+}
+
+func TestRenderAlignsProviders(t *testing.T) {
+	now := at(10, 8, 10, 0)
+	cards := []Card{
+		{Provider: "Claude Code", Number: 1, Email: "longer.name@example.com", Plan: "max", Active: true, Usage: swap.Usage{Live: true, Windows: []swap.Window{
+			{UsedPercent: 12, Minutes: 10080, Label: "Fable", ResetsAt: at(10, 9, 0, 0)},
+			{UsedPercent: 48, Minutes: 10080, ResetsAt: at(10, 9, 0, 0)},
+			{UsedPercent: 2, Minutes: 300, ResetsAt: at(10, 8, 13, 0)},
+		}}},
+		{Provider: "Codex", Number: 1, Email: "a@x.com", Plan: "plus", Active: true, Usage: swap.Usage{Live: true, Windows: []swap.Window{
+			{UsedPercent: 10, Minutes: 10080, ResetsAt: at(10, 15, 9, 0)},
+			{UsedPercent: 42, Minutes: 300, ResetsAt: at(10, 8, 13, 20)},
+		}}},
+	}
+	var buf bytes.Buffer
+	Render(&buf, cards, Options{Lang: En, Width: 160, Now: now})
+	lines := strings.Split(buf.String(), "\n")
+	var heads []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Account") {
+			heads = append(heads, line)
+		}
+	}
+	if len(heads) != 2 {
+		t.Fatalf("want 2 headers:\n%s", buf.String())
+	}
+	for _, name := range []string{"5-hour limit", "Weekly limit"} {
+		a, b := strings.Index(heads[0], name), strings.Index(heads[1], name)
+		if a < 0 || a != b {
+			t.Errorf("%s at %d and %d:\n%s", name, a, b, buf.String())
+		}
+	}
+	if !strings.Contains(heads[0], "Weekly limit (Fable)") || strings.Contains(heads[1], "Fable") {
+		t.Errorf("Fable column:\n%s", buf.String())
+	}
+	if strings.Index(heads[0], "5-hour") > strings.Index(heads[0], "Weekly limit") {
+		t.Errorf("5-hour column should come first:\n%s", buf.String())
 	}
 }
 

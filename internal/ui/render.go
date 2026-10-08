@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -142,15 +144,61 @@ func ResetTime(l Lang, t, now time.Time) string {
 
 func Render(w io.Writer, cards []Card, o Options) {
 	p := painter(o.Color)
+	l := o.Lang
+	cols := columns(cards, o)
+	nameWidth := displayWidth(l.T("colAccount"))
+	tagWidth := 0
+	for _, c := range cards {
+		nameWidth = max(nameWidth, displayWidth(cardTitle(c)))
+		if t := rowTags(c, o, p); t != "" {
+			tagWidth = max(tagWidth, visibleWidth(t)+2)
+		}
+	}
+	layout := func(withResets bool) int {
+		cells := 0
+		for i := range cols {
+			cols[i].width = usageWidth
+			if withResets && cols[i].reset > 0 {
+				cols[i].width += 2 + cols[i].reset
+			}
+			cols[i].width = max(cols[i].width, displayWidth(cols[i].head))
+			cells += cols[i].width + 2
+		}
+		return cells
+	}
+	cells := layout(true)
+	showResets := true
+	if min(nameWidth, 24)+cells+tagWidth > o.Width {
+		cells, showResets = layout(false), false
+	}
+	nameWidth = min(nameWidth, max(24, o.Width-cells-tagWidth))
+
+	var sections [][]string
 	resets := false
-	for i, group := range byProvider(cards) {
+	for _, group := range byProvider(cards) {
+		lines, rs := table(group, cols, nameWidth, cells, showResets, o, p)
+		sections = append(sections, lines)
+		resets = resets || rs
+	}
+	ruleWidth := 0
+	for _, lines := range sections {
+		for _, line := range lines {
+			ruleWidth = max(ruleWidth, visibleWidth(line))
+		}
+	}
+	ruleWidth = min(ruleWidth, o.Width)
+	for i, lines := range sections {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		resets = table(w, group, o, p) || resets
+		fmt.Fprintln(w, rule(p, byProvider(cards)[i][0].Provider, ruleWidth))
+		for _, line := range lines {
+			fmt.Fprintln(w, line)
+		}
+		fmt.Fprintln(w, rule(p, "", ruleWidth))
 	}
 	if resets {
-		fmt.Fprintln(w, p.color(colorDim, o.Lang.T("zoneNote", ZoneLabel(o.Zone, o.Now))))
+		fmt.Fprintln(w, p.color(colorDim, l.T("zoneNote", ZoneLabel(o.Zone, o.Now))))
 	}
 }
 
@@ -195,61 +243,58 @@ func resetsAt(win swap.Window, o Options) string {
 	return ResetTime(o.Lang, win.ResetsAt, o.Now)
 }
 
-func table(w io.Writer, group []Card, o Options, p painter) bool {
-	l := o.Lang
-	var cols []column
-	index := map[windowKey]int{}
-	for _, c := range group {
+func windowKeys(cards []Card) []windowKey {
+	var keys []windowKey
+	for _, c := range cards {
 		if c.State != OK {
 			continue
 		}
 		for _, win := range c.Usage.Windows {
-			k := windowKey{win.Minutes, win.Label}
-			i, ok := index[k]
-			if !ok {
-				i = len(cols)
-				index[k] = i
-				cols = append(cols, column{key: k, head: l.WindowTitle(k.minutes, k.label)})
+			if k := (windowKey{win.Minutes, win.Label}); !slices.Contains(keys, k) {
+				keys = append(keys, k)
 			}
-			cols[i].reset = max(cols[i].reset, displayWidth(resetsAt(win, o)))
 		}
 	}
-	nameWidth := displayWidth(l.T("colAccount"))
-	tags := make([]string, len(group))
-	tagWidth := 0
-	for j, c := range group {
-		nameWidth = max(nameWidth, displayWidth(cardTitle(c)))
-		tags[j] = rowTags(c, o, p)
-		if tags[j] != "" {
-			tagWidth = max(tagWidth, visibleWidth(tags[j])+2)
-		}
-	}
-	layout := func(withResets bool) int {
-		cells := 0
-		for i := range cols {
-			cols[i].width = usageWidth
-			if withResets && cols[i].reset > 0 {
-				cols[i].width += 2 + cols[i].reset
-			}
-			cols[i].width = max(cols[i].width, displayWidth(cols[i].head))
-			cells += cols[i].width + 2
-		}
-		return cells
-	}
-	cells := layout(true)
-	showResets := true
-	if min(nameWidth, 24)+cells+tagWidth > o.Width {
-		cells, showResets = layout(false), false
-	}
-	nameWidth = min(nameWidth, max(24, o.Width-cells-tagWidth))
+	return keys
+}
 
+func columns(cards []Card, o Options) []column {
+	var cols []column
+	for _, k := range windowKeys(cards) {
+		cols = append(cols, column{key: k, head: o.Lang.WindowTitle(k.minutes, k.label)})
+	}
+	slices.SortFunc(cols, func(a, b column) int {
+		if c := cmp.Compare(a.key.minutes, b.key.minutes); c != 0 {
+			return c
+		}
+		return strings.Compare(a.key.label, b.key.label)
+	})
+	for i := range cols {
+		for _, c := range cards {
+			for _, win := range c.Usage.Windows {
+				if c.State == OK && win.Minutes == cols[i].key.minutes && win.Label == cols[i].key.label {
+					cols[i].reset = max(cols[i].reset, displayWidth(resetsAt(win, o)))
+				}
+			}
+		}
+	}
+	return cols
+}
+
+func table(group []Card, cols []column, nameWidth, cells int, showResets bool, o Options, p painter) ([]string, bool) {
+	l := o.Lang
+	has := windowKeys(group)
 	header := pad(l.T("colAccount"), nameWidth)
 	for _, col := range cols {
-		header += "  " + pad(col.head, col.width)
+		head := ""
+		if slices.Contains(has, col.key) {
+			head = col.head
+		}
+		header += "  " + pad(head, col.width)
 	}
 	lines := []string{p.color(colorDim, strings.TrimRight(header, " "))}
 	shown := false
-	for j, c := range group {
+	for _, c := range group {
 		line := pad(truncate(cardTitle(c), nameWidth), nameWidth)
 		var msg string
 		code := colorDim
@@ -269,27 +314,21 @@ func table(w io.Writer, group []Card, o Options, p painter) bool {
 			line += "  " + padVisible(p.color(code, truncate(msg, max(o.Width-nameWidth-2, 16))), cells-2)
 		} else {
 			for _, col := range cols {
-				cell, rs := usageCell(c, col, showResets, o, p)
-				shown = shown || rs
+				cell := ""
+				if slices.Contains(has, col.key) {
+					var rs bool
+					cell, rs = usageCell(c, col, showResets, o, p)
+					shown = shown || rs
+				}
 				line += "  " + padVisible(cell, col.width)
 			}
 		}
-		if tags[j] != "" {
-			line += "  " + tags[j]
+		if tags := rowTags(c, o, p); tags != "" {
+			line += "  " + tags
 		}
 		lines = append(lines, strings.TrimRight(line, " "))
 	}
-	ruleWidth := 0
-	for _, line := range lines {
-		ruleWidth = max(ruleWidth, visibleWidth(line))
-	}
-	ruleWidth = min(ruleWidth, o.Width)
-	fmt.Fprintln(w, rule(p, group[0].Provider, ruleWidth))
-	for _, line := range lines {
-		fmt.Fprintln(w, line)
-	}
-	fmt.Fprintln(w, rule(p, "", ruleWidth))
-	return shown
+	return lines, shown
 }
 
 func rowTags(c Card, o Options, p painter) string {
