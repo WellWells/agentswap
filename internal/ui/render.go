@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -119,80 +121,257 @@ func Bar(pct, width int, color bool) string {
 	return s
 }
 
-var zhWeekdays = []string{"日", "一", "二", "三", "四", "五", "六"}
-
-func ResetLine(l Lang, t, now time.Time, zone string) string {
+func ResetTime(l Lang, t, now time.Time) string {
 	t = t.In(now.Location())
-	label := ZoneLabel(zone, t)
 	y1, m1, d1 := t.Date()
 	y2, m2, d2 := now.Date()
 	today := y1 == y2 && m1 == m2 && d1 == d2
 	if l != En {
-		clock := t.Format("15:04")
 		if today {
-			return "今天 " + clock + " 重置（" + label + "）"
+			return "今天 " + t.Format("15:04")
 		}
-		return t.Format("01/02") + "（" + zhWeekdays[t.Weekday()] + "）" + clock + " 重置（" + label + "）"
+		return t.Format("01/02 15:04")
 	}
 	clock := t.Format("3:04pm")
 	if t.Minute() == 0 {
 		clock = t.Format("3pm")
 	}
 	if today {
-		return "Resets " + clock + " (" + label + ")"
+		return clock
 	}
-	return "Resets " + t.Format("Jan 2") + ", " + clock + " (" + label + ")"
+	return t.Format("Jan 2") + " " + clock
 }
 
 func Render(w io.Writer, cards []Card, o Options) {
 	p := painter(o.Color)
-	barWidth := o.Width - 16
-	if barWidth > 50 {
-		barWidth = 50
+	l := o.Lang
+	cols := columns(cards, o)
+	nameWidth := displayWidth(l.T("colAccount"))
+	tagWidth := 0
+	for _, c := range cards {
+		nameWidth = max(nameWidth, displayWidth(cardTitle(c)))
+		if t := rowTags(c, o, p); t != "" {
+			tagWidth = max(tagWidth, visibleWidth(t)+2)
+		}
 	}
-	if barWidth < 10 {
-		barWidth = 10
+	layout := func(withResets bool) int {
+		cells := 0
+		for i := range cols {
+			cols[i].width = usageWidth
+			if withResets && cols[i].reset > 0 {
+				cols[i].width += 2 + cols[i].reset
+			}
+			cols[i].width = max(cols[i].width, displayWidth(cols[i].head))
+			cells += cols[i].width + 2
+		}
+		return cells
 	}
-	for i, c := range cards {
+	cells := layout(true)
+	showResets := true
+	if min(nameWidth, 24)+cells+tagWidth > o.Width {
+		cells, showResets = layout(false), false
+	}
+	nameWidth = min(nameWidth, max(24, o.Width-cells-tagWidth))
+
+	var sections [][]string
+	resets := false
+	for _, group := range byProvider(cards) {
+		lines, rs := table(group, cols, nameWidth, cells, showResets, o, p)
+		sections = append(sections, lines)
+		resets = resets || rs
+	}
+	ruleWidth := 0
+	for _, lines := range sections {
+		for _, line := range lines {
+			ruleWidth = max(ruleWidth, visibleWidth(line))
+		}
+	}
+	ruleWidth = min(ruleWidth, o.Width)
+	for i, lines := range sections {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		fmt.Fprintln(w, header(c, o.Lang, p))
-		fmt.Fprintln(w)
-		switch c.State {
-		case LoginExpired:
-			fmt.Fprintln(w, p.color(colorCrit, o.Lang.T("loginExpired")))
-			continue
-		case NoUsage:
-			fmt.Fprintln(w, p.color(colorDim, o.Lang.T("noUsage")))
-			continue
-		case Unavailable:
-			fmt.Fprintln(w, p.color(colorDim, o.Lang.T("unavailable", c.Detail)))
-			continue
+		fmt.Fprintln(w, rule(p, byProvider(cards)[i][0].Provider, ruleWidth))
+		for _, line := range lines {
+			fmt.Fprintln(w, line)
 		}
-		if len(c.Usage.Windows) == 0 {
-			fmt.Fprintln(w, p.color(colorDim, o.Lang.T("noData")))
-		}
-		for j, win := range c.Usage.Windows {
-			if j > 0 {
-				fmt.Fprintln(w)
-			}
-			pct := win.Percent(o.Now)
-			fmt.Fprintln(w, p.bold(o.Lang.WindowTitle(win.Minutes, win.Label)))
-			fmt.Fprintln(w, Bar(pct, barWidth, o.Color)+"  "+o.Lang.T("used", pct))
-			if !win.ResetsAt.IsZero() && win.ResetsAt.After(o.Now) {
-				fmt.Fprintln(w, p.color(colorDim, ResetLine(o.Lang, win.ResetsAt, o.Now, o.Zone)))
-			}
-		}
-		if !c.Usage.Live && !c.Usage.At.IsZero() {
-			fmt.Fprintln(w)
-			fmt.Fprintln(w, p.color(colorDim, o.Lang.T("fallback", o.Lang.Ago(o.Now.Sub(c.Usage.At)))))
-		}
+		fmt.Fprintln(w, rule(p, "", ruleWidth))
+	}
+	if resets {
+		fmt.Fprintln(w, p.color(colorDim, l.T("zoneNote", ZoneLabel(o.Zone, o.Now))))
 	}
 }
 
-func header(c Card, l Lang, p painter) string {
-	h := c.Provider + " · "
+func byProvider(cards []Card) [][]Card {
+	var groups [][]Card
+	for i, c := range cards {
+		if i == 0 || c.Provider != cards[i-1].Provider {
+			groups = append(groups, nil)
+		}
+		groups[len(groups)-1] = append(groups[len(groups)-1], c)
+	}
+	return groups
+}
+
+func rule(p painter, title string, width int) string {
+	line := []rune(strings.Repeat("─", width))
+	if title == "" {
+		return p.color(colorDim, string(line))
+	}
+	n := min(displayWidth(title)+1, len(line))
+	return p.bold(title) + " " + p.color(colorDim, string(line[n:]))
+}
+
+type windowKey struct {
+	minutes int
+	label   string
+}
+
+type column struct {
+	key   windowKey
+	head  string
+	width int
+	reset int
+}
+
+const usageWidth = 13
+
+func resetsAt(win swap.Window, o Options) string {
+	if win.ResetsAt.IsZero() || !win.ResetsAt.After(o.Now) {
+		return ""
+	}
+	return ResetTime(o.Lang, win.ResetsAt, o.Now)
+}
+
+func windowKeys(cards []Card) []windowKey {
+	var keys []windowKey
+	for _, c := range cards {
+		if c.State != OK {
+			continue
+		}
+		for _, win := range c.Usage.Windows {
+			if k := (windowKey{win.Minutes, win.Label}); !slices.Contains(keys, k) {
+				keys = append(keys, k)
+			}
+		}
+	}
+	return keys
+}
+
+func columns(cards []Card, o Options) []column {
+	var cols []column
+	for _, k := range windowKeys(cards) {
+		cols = append(cols, column{key: k, head: o.Lang.WindowTitle(k.minutes, k.label)})
+	}
+	slices.SortFunc(cols, func(a, b column) int {
+		if c := cmp.Compare(a.key.minutes, b.key.minutes); c != 0 {
+			return c
+		}
+		return strings.Compare(a.key.label, b.key.label)
+	})
+	for i := range cols {
+		for _, c := range cards {
+			for _, win := range c.Usage.Windows {
+				if c.State == OK && win.Minutes == cols[i].key.minutes && win.Label == cols[i].key.label {
+					cols[i].reset = max(cols[i].reset, displayWidth(resetsAt(win, o)))
+				}
+			}
+		}
+	}
+	return cols
+}
+
+func table(group []Card, cols []column, nameWidth, cells int, showResets bool, o Options, p painter) ([]string, bool) {
+	l := o.Lang
+	has := windowKeys(group)
+	header := pad(l.T("colAccount"), nameWidth)
+	for _, col := range cols {
+		head := ""
+		if slices.Contains(has, col.key) {
+			head = col.head
+		}
+		header += "  " + pad(head, col.width)
+	}
+	lines := []string{p.color(colorDim, strings.TrimRight(header, " "))}
+	shown := false
+	for _, c := range group {
+		line := pad(truncate(cardTitle(c), nameWidth), nameWidth)
+		var msg string
+		code := colorDim
+		switch c.State {
+		case LoginExpired:
+			msg, code = l.T("loginExpired"), colorCrit
+		case NoUsage:
+			msg = l.T("noUsage")
+		case Unavailable:
+			msg = l.T("unavailable", c.Detail)
+		default:
+			if len(c.Usage.Windows) == 0 {
+				msg = l.T("noData")
+			}
+		}
+		if msg != "" {
+			line += "  " + padVisible(p.color(code, truncate(msg, max(o.Width-nameWidth-2, 16))), cells-2)
+		} else {
+			for _, col := range cols {
+				cell := ""
+				if slices.Contains(has, col.key) {
+					var rs bool
+					cell, rs = usageCell(c, col, showResets, o, p)
+					shown = shown || rs
+				}
+				line += "  " + padVisible(cell, col.width)
+			}
+		}
+		if tags := rowTags(c, o, p); tags != "" {
+			line += "  " + tags
+		}
+		lines = append(lines, strings.TrimRight(line, " "))
+	}
+	return lines, shown
+}
+
+func rowTags(c Card, o Options, p painter) string {
+	l := o.Lang
+	var tags []string
+	if c.Active {
+		tags = append(tags, p.color(colorActive, l.T("active")))
+	}
+	if c.Suggest != "" {
+		tags = append(tags, p.color(colorWarn, l.T("suggest", c.Suggest)))
+	}
+	if c.Unsaved != "" {
+		tags = append(tags, p.color(colorDim, l.T("unsaved", c.Unsaved)))
+	}
+	if c.State == OK && !c.Usage.Live && !c.Usage.At.IsZero() {
+		tags = append(tags, p.color(colorDim, l.T("fallback", l.Ago(o.Now.Sub(c.Usage.At)))))
+	}
+	return strings.Join(tags, "  ")
+}
+
+func usageCell(c Card, col column, showResets bool, o Options, p painter) (string, bool) {
+	for _, win := range c.Usage.Windows {
+		if win.Minutes != col.key.minutes || win.Label != col.key.label {
+			continue
+		}
+		pct := win.Percent(o.Now)
+		text := padLeft(strconv.Itoa(pct)+"%", 4)
+		if pct >= 80 {
+			text = p.color(fillColor(pct), text)
+		}
+		bar := col.width - 5
+		if !showResets || col.reset == 0 {
+			return Bar(pct, bar, o.Color) + " " + text, false
+		}
+		when := resetsAt(win, o)
+		cell := Bar(pct, bar-2-col.reset, o.Color) + " " + text + "  " + p.color(colorDim, when)
+		return cell, when != ""
+	}
+	return p.color(colorDim, "—"), false
+}
+
+func cardTitle(c Card) string {
+	h := ""
 	if c.Number > 0 {
 		h += "#" + strconv.Itoa(c.Number) + " "
 	}
@@ -203,17 +382,46 @@ func header(c Card, l Lang, p painter) string {
 	if c.Plan != "" {
 		h += " · " + c.Plan
 	}
-	s := p.bold(h)
-	if c.Active {
-		s += "  " + p.color(colorActive, l.T("active"))
+	return h
+}
+
+func visibleWidth(s string) int {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
 	}
-	if c.Suggest != "" {
-		s += "  " + p.color(colorWarn, l.T("suggest", c.Suggest))
-	}
-	if c.Unsaved != "" {
-		s += "  " + p.color(colorDim, l.T("unsaved", c.Unsaved))
+	return displayWidth(b.String())
+}
+
+func padVisible(s string, width int) string {
+	if n := width - visibleWidth(s); n > 0 {
+		return s + strings.Repeat(" ", n)
 	}
 	return s
+}
+
+func padLeft(s string, width int) string {
+	if n := width - visibleWidth(s); n > 0 {
+		return strings.Repeat(" ", n) + s
+	}
+	return s
+}
+
+func truncate(s string, width int) string {
+	if displayWidth(s) <= width {
+		return s
+	}
+	r := []rune(s)
+	for len(r) > 0 && displayWidth(string(r))+1 > width {
+		r = r[:len(r)-1]
+	}
+	return string(r) + "…"
 }
 
 func headroom(c Card, now time.Time) (int, bool) {
