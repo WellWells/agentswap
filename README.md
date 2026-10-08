@@ -34,16 +34,18 @@ The installers only ship `agentswap` and run `agentswap link`, which adds the pe
 
 ## Usage
 
+Run any command without arguments for its help. `agentswap status` shows the usage of every saved account of every agent.
+
 ```sh
 codex login            # log in to the first account
 cxswap add work        # save it
 cxswap login personal  # log in to another account and save it
 
-cxswap                 # usage of every saved account
+cxswap status          # usage of every saved account
+cxswap status 2        # usage of one account (number, alias or email)
 cxswap list            # account numbers and switch commands
 cxswap 2               # switch by number, alias or email
 cxswap -               # switch back
-cxswap status 2        # usage of one account (number, alias or email)
 cxswap alias 2 home
 cxswap rm 2
 ```
@@ -58,7 +60,7 @@ Restart Codex after switching, including `codex app-server daemon restart`. `COD
 ccswap add work        # save the account signed in to Claude Code now
 ccswap import          # or import accounts from another tool
 
-ccswap                 # usage of every saved account
+ccswap status          # usage of every saved account
 ccswap status work     # usage of one account
 ccswap list
 ccswap 2               # switch; running sessions follow on their next request
