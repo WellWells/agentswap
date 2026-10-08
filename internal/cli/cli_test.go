@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/WellWells/agentswap/internal/procs"
 	"github.com/WellWells/agentswap/internal/ui"
 	"github.com/WellWells/agentswap/internal/vault"
 )
@@ -38,6 +39,26 @@ type harness struct {
 	agy        []byte
 	agyRunning bool
 	agyUsage   map[string]string
+
+	procs       []procs.Proc
+	stopped     []int
+	finds       int
+	interactive bool
+}
+
+func (h *harness) Find(names, skip []string) ([]procs.Proc, error) {
+	h.finds++
+	return procs.Filter(h.procs, names, skip, -1), nil
+}
+
+func (h *harness) Stop(ps []procs.Proc) error {
+	for _, p := range ps {
+		h.stopped = append(h.stopped, p.PID)
+		if strings.HasPrefix(p.Name, "agy") {
+			h.agyRunning = false
+		}
+	}
+	return nil
 }
 
 func newHarness(t *testing.T) *harness {
@@ -132,18 +153,20 @@ func (h *harness) run(args ...string) (int, string, string) {
 				"AGENTSWAP_ANTIGRAVITY_TOKEN_URL":  h.srv.URL + "/agy/token",
 			}[k]
 		},
-		Run:     h.runCmd,
-		Now:     func() time.Time { return h.now },
-		Home:    h.home,
-		Exe:     h.exe,
-		Version: "test",
-		Lang:    h.lang,
-		Width:   80,
-		Exec:    h.exec,
-		Output:  h.output,
-		Stdin:   strings.NewReader(h.stdin),
-		GOOS:    "linux",
-		Vault:   vault.WithKey(bytes.Repeat([]byte{9}, 32)),
+		Run:         h.runCmd,
+		Procs:       h,
+		Interactive: h.interactive,
+		Now:         func() time.Time { return h.now },
+		Home:        h.home,
+		Exe:         h.exe,
+		Version:     "test",
+		Lang:        h.lang,
+		Width:       80,
+		Exec:        h.exec,
+		Output:      h.output,
+		Stdin:       strings.NewReader(h.stdin),
+		GOOS:        "linux",
+		Vault:       vault.WithKey(bytes.Repeat([]byte{9}, 32)),
 	})
 	return code, out.String(), errb.String()
 }
@@ -1002,7 +1025,7 @@ func TestAntigravityAddUsageSwitchFlow(t *testing.T) {
 	before := append([]byte(nil), h.agy...)
 	h.agyRunning = true
 	code, _, errs := h.run("agswap", "home")
-	if code != 1 || !strings.Contains(errs, "agy is running") || !bytes.Equal(h.agy, before) {
+	if code != 1 || !strings.Contains(errs, "agy is still running") || !bytes.Equal(h.agy, before) {
 		t.Fatalf("running: %d %q %s", code, errs, h.agy)
 	}
 	h.agyRunning = false
@@ -1029,7 +1052,7 @@ func TestAntigravityLoginAndHelp(t *testing.T) {
 		t.Fatalf("%d %q", code, errs)
 	}
 	_, out, _ := h.run("agswap", "help")
-	for _, w := range []string{"agswap status [account]", "close agy first", "agy remote-control", "agswap/agyswap"} {
+	for _, w := range []string{"agswap status [account]", "agswap <account> --yes", "/logout", "agy remote-control", "agswap/agyswap"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
@@ -1044,5 +1067,81 @@ func TestAntigravityLoginAndHelp(t *testing.T) {
 	h.agy = []byte(strings.Replace(string(h.agy), `"refresh_token":"r-"`, `"refresh_token":""`, 1))
 	if code, _, errs := h.run("agswap", "add"); code != 1 || !strings.Contains(errs, "no refresh token") {
 		t.Fatalf("unsupported %d %q", code, errs)
+	}
+}
+
+func twoAgy(h *harness) {
+	h.agyLogin("s1", "a@gmail.com", "g1")
+	h.run("agswap", "add")
+	h.agyLogin("s2", "b@gmail.com", "g2")
+	h.run("agswap", "add")
+}
+
+func TestSwitchAsksBeforeStoppingAgy(t *testing.T) {
+	h := newHarness(t)
+	twoAgy(h)
+	h.procs = []procs.Proc{{PID: 7, PPID: 1, Name: "agy.exe", Path: `C:\agy\agy.exe`}, {PID: 8, PPID: 1, Name: "notepad.exe"}}
+	h.agyRunning = true
+	h.interactive = true
+	before := append([]byte(nil), h.agy...)
+	h.stdin = "n\n"
+	code, out, errs := h.run("agswap", "1")
+	if code != 1 || !strings.Contains(out, `PID 7       C:\agy\agy.exe`) || !strings.Contains(out, "[y/N]") || !strings.Contains(errs, "switch cancelled") || !strings.Contains(errs, "`agswap 1 --yes`") {
+		t.Fatalf("declined: %d %q %q", code, out, errs)
+	}
+	if len(h.stopped) != 0 || !bytes.Equal(h.agy, before) {
+		t.Fatalf("changed after decline: %v", h.stopped)
+	}
+	h.stdin = "y\n"
+	code, out, errs = h.run("agswap", "1")
+	if code != 0 || !strings.Contains(out, "Ended 1 process") || !strings.Contains(out, "Switched to a@gmail.com") {
+		t.Fatalf("accepted: %d %q %q", code, out, errs)
+	}
+	if len(h.stopped) != 1 || h.stopped[0] != 7 || !strings.Contains(string(h.agy), `"access_token":"g1"`) {
+		t.Fatalf("stopped %v live %s", h.stopped, h.agy)
+	}
+}
+
+func TestSwitchWithoutTerminalNeedsYes(t *testing.T) {
+	h := newHarness(t)
+	twoAgy(h)
+	h.procs = []procs.Proc{{PID: 7, PPID: 1, Name: "agy"}}
+	h.agyRunning = true
+	h.stdin = "y\n"
+	code, out, errs := h.run("agswap", "1")
+	if code != 1 || strings.Contains(out, "[y/N]") || !strings.Contains(errs, "switch cancelled") || len(h.stopped) != 0 {
+		t.Fatalf("no terminal: %d %q %q %v", code, out, errs, h.stopped)
+	}
+	code, out, errs = h.run("agswap", "-y", "1")
+	if code != 0 || strings.Contains(out, "[y/N]") || !strings.Contains(out, "Switched to a@gmail.com") || len(h.stopped) != 1 {
+		t.Fatalf("--yes: %d %q %q %v", code, out, errs, h.stopped)
+	}
+}
+
+func TestCodexSwitchKeepsDeclinedProcesses(t *testing.T) {
+	h := newHarness(t)
+	setupTwo(t, h)
+	h.procs = []procs.Proc{{PID: 9, PPID: 1, Name: "codex.exe"}}
+	code, out, errs := h.run("cxswap", "1")
+	if code != 0 || !strings.Contains(out, "Left them running") || !strings.Contains(out, "Switched to alice@x.com") || len(h.stopped) != 0 {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	h.finds = 0
+	if code, out, _ := h.run("cxswap", "1", "--yes"); code != 0 || !strings.Contains(out, "Already using") || h.finds != 0 {
+		t.Fatalf("already active looked for processes: %d %q finds=%d", code, out, h.finds)
+	}
+}
+
+func TestClaudeSwitchSkipsDesktopApp(t *testing.T) {
+	h := newHarness(t)
+	h.claude = map[string]string{"t1": claudeUsageBody, "t2": claudeUsageBody}
+	h.claudeLogin("u1", "o1", "a@x", "t1")
+	h.run("ccswap", "add")
+	h.claudeLogin("u2", "o2", "b@x", "t2")
+	h.run("ccswap", "add")
+	h.procs = []procs.Proc{{PID: 3, PPID: 1, Name: "claude.exe", Path: `C:\Users\u\AppData\Local\AnthropicClaude\app-1\claude.exe`}, {PID: 4, PPID: 1, Name: "claude.exe", Path: `C:\Users\u\.local\bin\claude.exe`}}
+	code, out, _ := h.run("ccswap", "1", "-y")
+	if code != 0 || strings.Contains(out, "AnthropicClaude") || len(h.stopped) != 1 || h.stopped[0] != 4 {
+		t.Fatalf("%d %q %v", code, out, h.stopped)
 	}
 }
