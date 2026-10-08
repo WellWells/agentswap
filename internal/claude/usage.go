@@ -240,7 +240,7 @@ func (p Provider) refresh(ctx context.Context, snap []byte, refreshToken string,
 	req.Header.Set("Accept", axiosAccept)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", official.ClaudeAxios)
-	resp, err := p.client().Do(req)
+	resp, err := swap.NoRedirect(p.client()).Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -95,16 +95,39 @@ func TestStoreModeFromConfig(t *testing.T) {
 	cases := map[string]string{
 		"":                    "file",
 		"model = \"gpt-5\"\n": "file",
-		"cli_auth_credentials_store = \"keyring\"\n":               "keyring",
-		"  cli_auth_credentials_store='auto' # x\n":                "auto",
-		"cli_auth_credentials_store = \"file\"\n":                  "file",
-		"# cli_auth_credentials_store = \"keyring\"\n":             "file",
-		"[profiles.x]\ncli_auth_credentials_store = \"keyring\"\n": "file",
+		"cli_auth_credentials_store = \"keyring\"\n":                                                                                 "keyring",
+		"  cli_auth_credentials_store='auto' # x\n":                                                                                  "auto",
+		"cli_auth_credentials_store = \"file\"\n":                                                                                    "file",
+		"# cli_auth_credentials_store = \"keyring\"\n":                                                                               "file",
+		"[profiles.x]\ncli_auth_credentials_store = \"keyring\"\n":                                                                   "file",
+		"\"cli_auth_credentials_store\" = \"keyring\"\n":                                                                             "keyring",
+		"'cli_auth_credentials_store' = 'keyring'\r\n":                                                                               "keyring",
+		strings.Repeat("#", 70000) + "\ncli_auth_credentials_store = \"keyring\"\n":                                                  "keyring",
+		"notes = \"\"\"\n[x]\ncli_auth_credentials_store = \"file\"\n\"\"\"\ncli_auth_credentials_store = \"keyring\"\n":             "keyring",
+		"a = [\n  \"x\", # c\n  [1, 2],\n]\nt = { k = \"]\" }\nd = 1979-05-27 07:32:00Z\ncli_auth_credentials_store = \"keyring\"\n": "keyring",
+		"x.cli_auth_credentials_store = \"keyring\"\n":                                                                               "file",
 	}
 	for in, want := range cases {
-		if got := storeMode([]byte(in)); got != want {
-			t.Errorf("%q: got %s want %s", in, got, want)
+		if got, err := storeMode([]byte(in)); err != nil || got != want {
+			t.Errorf("%q: got %s, %v want %s", in, got, err, want)
 		}
+	}
+	for _, in := range []string{"cli_auth_credentials_store = \"keyring\n", "= 1\n", "a = [1,\n", "a = 1 2\n"} {
+		if _, err := storeMode([]byte(in)); err == nil {
+			t.Errorf("%q: malformed config accepted", in)
+		}
+	}
+}
+
+func TestWriteLiveRefusesUnparsableConfig(t *testing.T) {
+	p := Provider{Home: t.TempDir()}
+	os.WriteFile(filepath.Join(p.Home, "config.toml"), []byte("cli_auth_credentials_store = \"keyring\n"), 0o600)
+	os.WriteFile(p.AuthPath(), []byte("old"), 0o600)
+	if err := p.WriteLive([]byte("new")); err == nil {
+		t.Fatal("WriteLive accepted an unparsable config.toml")
+	}
+	if b, _ := os.ReadFile(p.AuthPath()); string(b) != "old" {
+		t.Fatalf("auth.json overwritten: %q", b)
 	}
 }
 

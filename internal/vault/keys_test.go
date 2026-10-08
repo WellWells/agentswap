@@ -111,6 +111,30 @@ func TestLostKeyringKeyIsNeverRecreated(t *testing.T) {
 	}
 }
 
+func TestExistingKeyringKeyIsProtectedAfterLoss(t *testing.T) {
+	key := hex.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	for _, name := range []string{"keychain", "secret"} {
+		dir := t.TempDir()
+		f := &fakeRunner{secrets: map[string]string{name: key}}
+		open := func() Vault {
+			if name == "keychain" {
+				return newDarwin(dir, f.run)
+			}
+			return newLinux(dir, &bytes.Buffer{}, f.run, func() string { return "m" })
+		}
+		if _, err := open().Seal([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+		delete(f.secrets, name)
+		if _, err := open().Seal([]byte("y")); !errors.Is(err, ErrKey) {
+			t.Fatalf("%s: err = %v", name, err)
+		}
+		if _, ok := f.secrets[name]; ok {
+			t.Fatalf("%s: key was recreated", name)
+		}
+	}
+}
+
 func TestLinuxPrefersSecretTool(t *testing.T) {
 	f := &fakeRunner{secrets: map[string]string{}}
 	var warn bytes.Buffer

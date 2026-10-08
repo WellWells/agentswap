@@ -149,7 +149,7 @@ func TestSwitchToActiveAccountIsNoop(t *testing.T) {
 func TestSwitchFailsWhileLocked(t *testing.T) {
 	m, f := newManager(t)
 	addAccount(t, m, f, "k1|a@x|v1", "")
-	l, err := fsx.Acquire(m.S.LockPath(), time.Second, time.Minute)
+	l, err := fsx.Acquire(m.S.LockPath(), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestSetAlias(t *testing.T) {
 	if r.Accounts[0].Alias != "work" {
 		t.Fatalf("alias %q", r.Accounts[0].Alias)
 	}
-	for _, bad := range []string{"home", "3", "-"} {
+	for _, bad := range []string{"home", "3", "-", "B@X", "a\x1b[2J", "a\x7f"} {
 		if err := m.SetAlias("1", bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}

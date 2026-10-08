@@ -833,6 +833,30 @@ func TestClaudeImportMenuChoosesCswap(t *testing.T) {
 	}
 }
 
+func TestClaudeImportFailureKeepsCswap(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.home, ".local", "share", "claude-swap")
+	writeCswapFixture(t, dir)
+	os.Remove(filepath.Join(dir, "configs", ".claude-config-2-b@x.json"))
+	code, out, errs := h.run("ccswap", "import", "1")
+	if code != 1 || strings.Contains(out, "cswap purge") || !strings.Contains(out, "Imported home <a@x>") || !strings.Contains(errs, "1 account(s) were not imported") {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+}
+
+func TestClaudeImportDoesNotEchoControlCharacters(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.home, ".local", "share", "claude-swap")
+	writeCswapFixture(t, dir)
+	seq, _ := os.ReadFile(filepath.Join(dir, "sequence.json"))
+	os.WriteFile(filepath.Join(dir, "sequence.json"), []byte(strings.Replace(string(seq), `"alias":"home"`, `"alias":"\u001b[2Jhome"`, 1)), 0o600)
+	code, out, errs := h.run("ccswap", "import", "1")
+	_, list, _ := h.run("ccswap", "list")
+	if code != 0 || strings.ContainsRune(out+errs+list, 0x1b) {
+		t.Fatalf("%d %q %q %q", code, out, errs, list)
+	}
+}
+
 func TestClaudeImportMenuCancel(t *testing.T) {
 	h := newHarness(t)
 	h.stdin = "\n"

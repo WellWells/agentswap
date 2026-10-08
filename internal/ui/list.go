@@ -5,7 +5,17 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
 )
+
+func Clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '?'
+		}
+		return r
+	}, s)
+}
 
 func displayWidth(s string) int {
 	w := 0
@@ -36,12 +46,12 @@ func List(w io.Writer, provider string, cards []Card, cmd func(Card) string, o O
 	}
 	rows := []row{{cells: [3]string{l.T("colNumber"), l.T("colAccount"), l.T("colPlan")}, action: l.T("colSwitch"), color: colorDim}}
 	for _, c := range cards {
-		r := row{cells: [3]string{"-", "<" + c.Email + ">", c.Plan}}
+		r := row{cells: [3]string{"-", "<" + Clean(c.Email) + ">", Clean(c.Plan)}}
 		if c.Number > 0 {
 			r.cells[0] = strconv.Itoa(c.Number)
 		}
 		if c.Alias != "" {
-			r.cells[1] = c.Alias + " " + r.cells[1]
+			r.cells[1] = Clean(c.Alias) + " " + r.cells[1]
 		}
 		switch {
 		case c.Unsaved != "":

@@ -272,6 +272,7 @@ func (e Env) report(prog string, p provider, err error) int {
 	}
 	msg := err.Error()
 	var qe queryError
+	var ii importIncomplete
 	switch {
 	case errors.As(err, &qe) && qe.query == "-" && errors.Is(err, store.ErrNotFound):
 		msg = l.T("noPrevious")
@@ -303,6 +304,8 @@ func (e Env) report(prog string, p provider, err error) int {
 		msg = l.T("vaultKey")
 	case errors.Is(err, vault.ErrCorrupt):
 		msg = l.T("vaultCorrupt")
+	case errors.As(err, &ii):
+		msg = l.T("cswapIncomplete", ii.failed, ii.dir, prog)
 	}
 	fmt.Fprintf(e.Stderr, "%s: %s\n", prog, msg)
 	return 1
@@ -744,7 +747,7 @@ func label(a store.Account) string {
 	if a.Plan != "" {
 		s += " [" + a.Plan + "]"
 	}
-	return s
+	return ui.Clean(s)
 }
 
 func (e Env) usage(prog string) string {
@@ -789,6 +792,15 @@ func importMenu(e Env, m *swap.Manager, choice string) error {
 	return importCswap(e, m, found)
 }
 
+type importIncomplete struct {
+	failed int
+	dir    string
+}
+
+func (e importIncomplete) Error() string {
+	return fmt.Sprintf("%d account(s) not imported", e.failed)
+}
+
 func importCswap(e Env, m *swap.Manager, dir string) error {
 	l := e.Lang
 	var keychain func(int, string) ([]byte, error)
@@ -799,18 +811,23 @@ func importCswap(e Env, m *swap.Manager, dir string) error {
 	if err != nil {
 		return err
 	}
+	failed := 0
 	for _, a := range accts {
 		name := a.Email
 		if a.Alias != "" {
 			name = a.Alias + " <" + a.Email + ">"
 		}
+		name = ui.Clean(name)
 		if a.Err != nil {
 			fmt.Fprintln(e.Stdout, l.T("importFailed", name, importReason(l, a.Err)))
+			if !errors.Is(a.Err, claude.ErrUnsupportedLogin) {
+				failed++
+			}
 			continue
 		}
 		acc, err := m.Adopt(a.Snapshot, a.Alias)
 		if err != nil && a.Alias != "" && errors.Is(err, swap.ErrAlias) {
-			fmt.Fprintln(e.Stdout, l.T("importAliasDropped", a.Alias, a.Email))
+			fmt.Fprintln(e.Stdout, l.T("importAliasDropped", a.Alias, ui.Clean(a.Email)))
 			acc, err = m.Adopt(a.Snapshot, "")
 		}
 		if errors.Is(err, swap.ErrExists) {
@@ -819,11 +836,17 @@ func importCswap(e Env, m *swap.Manager, dir string) error {
 		}
 		if err != nil {
 			fmt.Fprintln(e.Stdout, l.T("importFailed", name, importReason(l, err)))
+			if !errors.Is(err, claude.ErrUnsupportedLogin) {
+				failed++
+			}
 			continue
 		}
 		fmt.Fprintln(e.Stdout, l.T("imported", label(acc)))
 	}
 	fmt.Fprintln(e.Stdout)
+	if failed > 0 {
+		return importIncomplete{failed, dir}
+	}
 	fmt.Fprintln(e.Stdout, l.T("cswapAfter", dir))
 	return nil
 }

@@ -52,10 +52,15 @@ func hasMarker(dir string) bool {
 	return err == nil
 }
 
-func checkMarker(dir string, k []byte) ([]byte, error) {
+func checkMarker(dir string, k []byte, create bool) ([]byte, error) {
 	b, err := os.ReadFile(markerPath(dir))
-	if err == nil && strings.TrimSpace(string(b)) != keyID(k) {
+	switch {
+	case err == nil && strings.TrimSpace(string(b)) != keyID(k):
 		return nil, errKeyLost
+	case errors.Is(err, fs.ErrNotExist) && create:
+		if err := writeMarker(dir, k); err != nil {
+			return nil, err
+		}
 	}
 	return k, nil
 }
@@ -81,7 +86,7 @@ func (s keychainKey) key(create bool) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return checkMarker(s.dir, k)
+		return checkMarker(s.dir, k, create)
 	}
 	if code != 44 {
 		return nil, fmt.Errorf("security find-generic-password: exit %d", code)
@@ -115,7 +120,7 @@ func (s secretToolKey) key(create bool) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return checkMarker(s.dir, k)
+		return checkMarker(s.dir, k, create)
 	}
 	if hasMarker(s.dir) || !create {
 		return nil, errKeyLost

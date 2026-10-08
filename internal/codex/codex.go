@@ -1,8 +1,6 @@
 package codex
 
 import (
-	"bufio"
-	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -55,7 +53,11 @@ func (p Provider) check() error {
 	if err != nil {
 		return err
 	}
-	if m := storeMode(b); m != "file" {
+	m, err := storeMode(b)
+	if err != nil {
+		return err
+	}
+	if m != "file" {
 		return fmt.Errorf("%w (current: %s)", ErrKeyringStore, m)
 	}
 	return nil
@@ -141,27 +143,10 @@ func firstNonEmpty(s ...string) string {
 	return ""
 }
 
-func storeMode(config []byte) string {
-	if v := topLevel(config, "cli_auth_credentials_store"); v != "" {
-		return strings.ToLower(v)
+func storeMode(config []byte) (string, error) {
+	v, err := topLevel(config, "cli_auth_credentials_store")
+	if err != nil || v == "" {
+		return "file", err
 	}
-	return "file"
-}
-
-func topLevel(config []byte, key string) string {
-	sc := bufio.NewScanner(bytes.NewReader(config))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if i := strings.IndexByte(line, '#'); i >= 0 {
-			line = strings.TrimSpace(line[:i])
-		}
-		if strings.HasPrefix(line, "[") {
-			break
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if ok && strings.TrimSpace(k) == key {
-			return strings.Trim(strings.TrimSpace(v), `"'`)
-		}
-	}
-	return ""
+	return strings.ToLower(v), nil
 }

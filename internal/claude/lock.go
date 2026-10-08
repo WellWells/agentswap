@@ -33,8 +33,9 @@ func acquireDir(path string, stale, wait time.Duration) (*dirLock, error) {
 			return nil, err
 		}
 		if st, serr := os.Stat(path); serr == nil && time.Since(st.ModTime()) > stale {
-			os.Remove(path)
-			continue
+			if os.Remove(path) == nil {
+				continue
+			}
 		}
 		if time.Now().After(deadline) {
 			return nil, ErrBusy

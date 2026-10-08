@@ -71,6 +71,11 @@ func TestFindErrors(t *testing.T) {
 	if _, err := r.Find("home"); !errors.Is(err, ErrAmbiguous) {
 		t.Errorf("home: %v", err)
 	}
+	r.Accounts[0].Alias = "bob@home.net"
+	if _, err := r.Find("BOB@home.net"); !errors.Is(err, ErrAmbiguous) {
+		t.Errorf("alias/email collision: %v", err)
+	}
+	r.Accounts[0].Alias = "work"
 	for _, q := range []string{"", "0", "4", "nobody"} {
 		if _, err := r.Find(q); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%q: %v", q, err)

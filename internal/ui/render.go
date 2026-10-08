@@ -407,7 +407,7 @@ func cardTitle(c Card) string {
 	if c.Plan != "" {
 		h += " · " + c.Plan
 	}
-	return h
+	return Clean(h)
 }
 
 func visibleWidth(s string) int {

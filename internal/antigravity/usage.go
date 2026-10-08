@@ -283,7 +283,7 @@ func (p Provider) refresh(ctx context.Context, ua string, snap []byte, refreshTo
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", ua)
-	resp, err := p.client().Do(req)
+	resp, err := swap.NoRedirect(p.client()).Do(req)
 	if err != nil {
 		return nil, err
 	}

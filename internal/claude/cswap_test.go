@@ -2,6 +2,7 @@ package claude
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -76,6 +77,23 @@ func TestReadCswapUsesKeychainWhenEncMissing(t *testing.T) {
 	})
 	if err != nil || got[0].Err != nil {
 		t.Fatalf("%v %+v", err, got)
+	}
+}
+
+func TestReadCswapRejectsPathsInEmail(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "import")
+	for _, email := range []string{"/../../../outside", `\..\..\..\outside`, "a\x1b@x"} {
+		writeCswap(t, dir, 1, email, creds("at", "outside-refresh"), `{"oauthAccount":`+oauth("u1", "o1", "o@x")+`}`)
+		seq, _ := json.Marshal(map[string]any{"sequence": []int{1}, "accounts": map[string]any{"1": map[string]string{"email": email}}})
+		os.WriteFile(filepath.Join(dir, "sequence.json"), seq, 0o600)
+		got, err := ReadCswap(dir, func(int, string) ([]byte, error) {
+			t.Fatalf("%q reached the keychain", email)
+			return nil, nil
+		})
+		if err != nil || len(got) != 1 || got[0].Err == nil {
+			t.Fatalf("%q: %v %+v", email, err, got)
+		}
 	}
 }
 

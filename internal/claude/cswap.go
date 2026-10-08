@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/WellWells/agentswap/internal/execx"
 	"github.com/WellWells/agentswap/internal/jsonx"
@@ -74,6 +75,9 @@ func ReadCswap(dir string, keychain func(slot int, email string) ([]byte, error)
 func cswapSnapshot(dir string, n int, email, kind string, keychain func(int, string) ([]byte, error)) ([]byte, error) {
 	if kind == "api_key" {
 		return nil, ErrUnsupportedLogin
+	}
+	if email == "" || email == "." || email == ".." || strings.ContainsAny(email, `/\:`) || strings.IndexFunc(email, unicode.IsControl) >= 0 {
+		return nil, fmt.Errorf("sequence.json: invalid email %q", email)
 	}
 	name := fmt.Sprintf(".creds-%d-%s.enc", n, email)
 	enc, err := os.ReadFile(filepath.Join(dir, "credentials", name))

@@ -93,13 +93,19 @@ func (r *Registry) Find(q string) (int, error) {
 		}
 		return -1, fmt.Errorf("%w: %s", ErrNotFound, q)
 	}
+	found := -1
 	for i, a := range r.Accounts {
 		if strings.EqualFold(a.Alias, q) || strings.EqualFold(a.Email, q) {
-			return i, nil
+			if found >= 0 {
+				return -1, fmt.Errorf("%w: %s", ErrAmbiguous, q)
+			}
+			found = i
 		}
 	}
+	if found >= 0 {
+		return found, nil
+	}
 	lq := strings.ToLower(q)
-	found := -1
 	for i, a := range r.Accounts {
 		if strings.Contains(strings.ToLower(a.Alias), lq) || strings.Contains(strings.ToLower(a.Email), lq) {
 			if found >= 0 {

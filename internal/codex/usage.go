@@ -94,7 +94,7 @@ func (p Provider) baseURL() string {
 		return p.BaseURL
 	}
 	if b, err := os.ReadFile(filepath.Join(p.Home, "config.toml")); err == nil {
-		if v := topLevel(b, "chatgpt_base_url"); v != "" {
+		if v, err := topLevel(b, "chatgpt_base_url"); err == nil && v != "" {
 			return v
 		}
 	}
@@ -253,7 +253,7 @@ func (p Provider) refreshTokens(ctx context.Context, snap []byte, refreshToken s
 	}
 	req.Header.Set("Content-Type", "application/json")
 	p.identify(req)
-	resp, err := p.client().Do(req)
+	resp, err := swap.NoRedirect(p.client()).Do(req)
 	if err != nil {
 		return nil, err
 	}

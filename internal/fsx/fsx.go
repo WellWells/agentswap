@@ -3,7 +3,6 @@ package fsx
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -46,32 +45,41 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 }
 
-type Lock struct{ path string }
+type Lock struct{ f *os.File }
 
-func Acquire(path string, timeout, stale time.Duration) (*Lock, error) {
+func Acquire(path string, timeout time.Duration) (*Lock, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	if st, err := os.Lstat(path); err == nil && !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("lock %s is not a regular file", path)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
 		return nil, err
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			fmt.Fprintf(f, "%d", os.Getpid())
+		ok, err := tryLock(f)
+		if err != nil {
 			f.Close()
-			return &Lock{path}, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
 			return nil, err
 		}
-		if st, serr := os.Stat(path); serr == nil && time.Since(st.ModTime()) > stale {
-			os.Remove(path)
-			continue
+		if ok {
+			return &Lock{f}, nil
 		}
 		if time.Now().After(deadline) {
+			f.Close()
 			return nil, ErrLocked
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
-func (l *Lock) Release() error { return os.Remove(l.path) }
+func (l *Lock) Release() error {
+	err := unlock(l.f)
+	if cerr := l.f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}

@@ -3,6 +3,7 @@ package fsx
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -55,31 +56,78 @@ func TestWriteAtomicSetsPrivateMode(t *testing.T) {
 
 func TestLockBlocksSecondHolder(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "lock")
-	l, err := Acquire(p, time.Second, time.Minute)
+	l, err := Acquire(p, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Acquire(p, 100*time.Millisecond, time.Minute); !errors.Is(err, ErrLocked) {
+	if _, err := Acquire(p, 100*time.Millisecond); !errors.Is(err, ErrLocked) {
 		t.Fatalf("want ErrLocked, got %v", err)
 	}
 	if err := l.Release(); err != nil {
 		t.Fatal(err)
 	}
-	l2, err := Acquire(p, 100*time.Millisecond, time.Minute)
+	l2, err := Acquire(p, 100*time.Millisecond)
 	if err != nil {
 		t.Fatalf("reacquire: %v", err)
 	}
 	l2.Release()
 }
 
-func TestLockTakesOverStaleLock(t *testing.T) {
+func TestLockReusesLeftoverFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "lock")
 	os.WriteFile(p, []byte("1"), 0o600)
+	l, err := Acquire(p, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("leftover lock file blocked: %v", err)
+	}
+	l.Release()
+}
+
+func TestLockOldMtimeDoesNotStealHeldLock(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "lock")
+	l, err := Acquire(p, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release()
 	old := time.Now().Add(-time.Hour)
 	os.Chtimes(p, old, old)
-	l, err := Acquire(p, 100*time.Millisecond, time.Minute)
+	if l2, err := Acquire(p, 100*time.Millisecond); !errors.Is(err, ErrLocked) {
+		if l2 != nil {
+			l2.Release()
+		}
+		t.Fatalf("want ErrLocked, got %v", err)
+	}
+}
+
+func TestLockRejectsDirectory(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "lock")
+	os.MkdirAll(filepath.Join(p, "x"), 0o700)
+	start := time.Now()
+	if _, err := Acquire(p, 5*time.Second); err == nil || errors.Is(err, ErrLocked) {
+		t.Fatalf("got %v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("did not fail fast")
+	}
+}
+
+func TestLockReleasedWhenHolderExits(t *testing.T) {
+	if p := os.Getenv("FSX_LOCK_CHILD"); p != "" {
+		if _, err := Acquire(p, time.Second); err != nil {
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
+	p := filepath.Join(t.TempDir(), "lock")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestLockReleasedWhenHolderExits$")
+	cmd.Env = append(os.Environ(), "FSX_LOCK_CHILD="+p)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child: %v %s", err, out)
+	}
+	l, err := Acquire(p, time.Second)
 	if err != nil {
-		t.Fatalf("stale lock not taken over: %v", err)
+		t.Fatalf("lock not released after holder exited: %v", err)
 	}
 	l.Release()
 }

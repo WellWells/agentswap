@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/WellWells/agentswap/internal/fsx"
 	"github.com/WellWells/agentswap/internal/store"
@@ -52,7 +53,7 @@ func (m *Manager) withRegistry(hold bool, fn func(r *store.Registry, l live) err
 	if timeout == 0 {
 		timeout = 15 * time.Second
 	}
-	lk, err := fsx.Acquire(m.S.LockPath(), timeout, 2*time.Minute)
+	lk, err := fsx.Acquire(m.S.LockPath(), timeout)
 	if err != nil {
 		return err
 	}
@@ -314,11 +315,11 @@ func (a aliasError) Error() string { return string(a) }
 func (a aliasError) Unwrap() error { return ErrAlias }
 
 func validAlias(r *store.Registry, alias, key string) error {
-	if _, err := strconv.Atoi(alias); err == nil || alias == "-" || strings.ContainsAny(alias, " \t") {
+	if _, err := strconv.Atoi(alias); err == nil || alias == "-" || strings.ContainsAny(alias, " \t") || strings.IndexFunc(alias, unicode.IsControl) >= 0 {
 		return aliasError(fmt.Sprintf("invalid alias %q", alias))
 	}
 	for _, a := range r.Accounts {
-		if a.Key != key && strings.EqualFold(a.Alias, alias) {
+		if a.Key != key && (strings.EqualFold(a.Alias, alias) || strings.EqualFold(a.Email, alias)) {
 			return aliasError(fmt.Sprintf("alias %q is already used by %s", alias, a.Email))
 		}
 	}
