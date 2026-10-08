@@ -24,32 +24,101 @@ func env(m map[string]string) func(string) string {
 func TestDetectLang(t *testing.T) {
 	cases := []struct {
 		env    map[string]string
-		system string
+		system []string
 		want   Lang
 	}{
-		{nil, "", En},
-		{nil, "zh-TW", ZhTW},
-		{nil, "zh-CN", ZhTW},
-		{nil, "en-US", En},
-		{map[string]string{"LANG": "zh_TW.UTF-8"}, "en-US", ZhTW},
-		{map[string]string{"LANG": "en_US.UTF-8"}, "zh-TW", En},
-		{map[string]string{"LANG": "C.UTF-8"}, "zh-TW", ZhTW},
-		{map[string]string{"LC_ALL": "en_GB", "LANG": "zh_TW"}, "", En},
-		{map[string]string{"AGENTSWAP_LANG": "zh-TW", "LC_ALL": "en_US"}, "", ZhTW},
-		{map[string]string{"AGENTSWAP_LANG": "en"}, "zh-TW", En},
+		{nil, nil, En},
+		{nil, []string{"zh-TW"}, ZhTW},
+		{nil, []string{"zh-CN"}, ZhCN},
+		{nil, []string{"zh-Hans-SG"}, ZhCN},
+		{nil, []string{"zh-Hant-TW", "en-US"}, ZhTW},
+		{nil, []string{"zh-HK"}, ZhTW},
+		{nil, []string{"en-US"}, En},
+		{nil, []string{"ja-JP"}, En},
+		{nil, []string{"ja-JP", "zh-Hant-TW"}, ZhTW},
+		{nil, []string{"fr-FR", "de-DE"}, En},
+		{map[string]string{"LANG": "zh_TW.UTF-8"}, []string{"en-US"}, ZhTW},
+		{map[string]string{"LANG": "zh_CN.UTF-8"}, []string{"zh-TW"}, ZhCN},
+		{map[string]string{"LANG": "en_US.UTF-8"}, []string{"zh-TW"}, En},
+		{map[string]string{"LANG": "C.UTF-8"}, []string{"zh-TW"}, ZhTW},
+		{map[string]string{"LANG": "ja_JP.UTF-8"}, []string{"zh-TW"}, ZhTW},
+		{map[string]string{"LANGUAGE": "ja:zh_CN:en"}, nil, ZhCN},
+		{map[string]string{"LC_ALL": "en_GB", "LANG": "zh_TW"}, nil, En},
+		{map[string]string{"AGENTSWAP_LANG": "zh-TW", "LC_ALL": "en_US"}, nil, ZhTW},
+		{map[string]string{"AGENTSWAP_LANG": "zhc"}, []string{"zh-TW"}, ZhCN},
+		{map[string]string{"AGENTSWAP_LANG": "zht"}, []string{"zh-CN"}, ZhTW},
+		{map[string]string{"AGENTSWAP_LANG": "en"}, []string{"zh-TW"}, En},
 	}
 	for _, c := range cases {
-		if got := DetectLang(env(c.env), c.system); got != c.want {
+		system := c.system
+		if got := DetectLang(env(c.env), func() []string { return system }); got != c.want {
 			t.Errorf("%v / %q: got %v want %v", c.env, c.system, got, c.want)
 		}
 	}
 }
 
-func TestMessagesExistInBothLanguages(t *testing.T) {
-	for key, m := range messages {
-		if m[En] == "" || m[ZhTW] == "" {
-			t.Errorf("%s missing a translation", key)
+func TestDetectLangSkipsSystemWhenEnvDecides(t *testing.T) {
+	called := false
+	DetectLang(env(map[string]string{"LANG": "en_US.UTF-8"}), func() []string { called = true; return nil })
+	if called {
+		t.Error("system languages read although LANG decided")
+	}
+}
+
+func TestParseLang(t *testing.T) {
+	cases := map[string]Lang{"en": En, "EN": En, "zh-TW": ZhTW, "zh_tw": ZhTW, "zht": ZhTW, "ZHT": ZhTW, " zh-cn ": ZhCN, "ZH-CN": ZhCN, "zhc": ZhCN}
+	for s, want := range cases {
+		if got, ok := ParseLang(s); !ok || got != want {
+			t.Errorf("%q: got %v %v want %v", s, got, ok, want)
 		}
+	}
+	for _, s := range []string{"", "zh", "zh-HK", "zh-Hant", "zhs", "fr", "auto"} {
+		if _, ok := ParseLang(s); ok {
+			t.Errorf("%q should be rejected", s)
+		}
+	}
+	for _, l := range Langs {
+		if got, ok := ParseLang(l.Code()); !ok || got != l {
+			t.Errorf("%s does not round-trip", l.Code())
+		}
+	}
+	if ZhTW.Codes() != "zh-TW/zht" || En.Codes() != "en" {
+		t.Errorf("codes: %q %q", ZhTW.Codes(), En.Codes())
+	}
+}
+
+func TestSystemLanguageParsers(t *testing.T) {
+	buf := []uint16{}
+	for _, s := range []string{"zh-TW", "en-US"} {
+		for _, r := range s {
+			buf = append(buf, uint16(r))
+		}
+		buf = append(buf, 0)
+	}
+	buf = append(buf, 0)
+	if got := strings.Join(splitMultiSZ(buf), ","); got != "zh-TW,en-US" {
+		t.Errorf("multi-sz: %q", got)
+	}
+	apple := "(\n    \"zh-Hant-TW\",\n    en\n)\n"
+	if got := strings.Join(parseAppleLanguages(apple), ","); got != "zh-Hant-TW,en" {
+		t.Errorf("apple: %q", got)
+	}
+	conf := "# comment\nLANG=\"zh_CN.UTF-8\"\nexport LANGUAGE=ja:en\n"
+	if got := strings.Join(parseLocaleConf(conf), ","); got != "ja,en,zh_CN.UTF-8" {
+		t.Errorf("locale.conf: %q", got)
+	}
+}
+
+func TestMessagesExistInEveryLanguage(t *testing.T) {
+	for key, m := range messages {
+		for _, l := range Langs {
+			if m[l] == "" {
+				t.Errorf("%s missing %s", key, l.Code())
+			}
+		}
+	}
+	if ZhCN.T("week") != "本周额度" {
+		t.Fatalf("got %q", ZhCN.T("week"))
 	}
 	if En.T("used", 7) != "7% used" || ZhTW.T("used", 7) != "已用 7%" {
 		t.Fatalf("got %q / %q", En.T("used", 7), ZhTW.T("used", 7))
@@ -119,6 +188,7 @@ func TestResetLine(t *testing.T) {
 		{En, at(10, 8, 15, 0), "", "Resets 3pm (UTC+8)"},
 		{En, at(10, 14, 17, 41), "Asia/Taipei", "Resets Oct 14, 5:41pm (Asia/Taipei)"},
 		{ZhTW, at(10, 8, 15, 20), "", "今天 15:20 重置（UTC+8）"},
+		{ZhCN, at(10, 14, 17, 41), "", "10/14（三）17:41 重置（UTC+8）"},
 		{ZhTW, at(10, 14, 17, 41), "", "10/14（三）17:41 重置（UTC+8）"},
 	}
 	for _, c := range cases {
@@ -265,7 +335,7 @@ func TestStateFromError(t *testing.T) {
 }
 
 func TestUsageColumnsAligned(t *testing.T) {
-	for _, l := range []Lang{En, ZhTW} {
+	for _, l := range Langs {
 		for _, key := range []string{"usage", "usageClaude"} {
 			checkUsageColumns(t, l, l.T(key, "cxswap"), "  cxswap")
 		}
@@ -368,5 +438,14 @@ func TestModelWindowTitleAndHeadroom(t *testing.T) {
 	Render(&b, []Card{c}, Options{Lang: En, Width: 80, Now: now})
 	if !strings.Contains(b.String(), "(Opus)") {
 		t.Fatalf("render: %s", b.String())
+	}
+}
+
+func TestLangListNumbersAndMarksCurrent(t *testing.T) {
+	var buf bytes.Buffer
+	LangList(&buf, ZhTW, false)
+	want := "  1  en         English\n  2  zh-TW/zht  正體中文  ● 使用中\n  3  zh-CN/zhc  简体中文\n"
+	if buf.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", buf.String(), want)
 	}
 }

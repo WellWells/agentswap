@@ -9,8 +9,6 @@ import (
 	"unsafe"
 )
 
-func SystemLocale() string { return "" }
-
 func systemZone() string {
 	p, err := os.Readlink("/etc/localtime")
 	if err != nil {

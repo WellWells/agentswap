@@ -30,6 +30,7 @@ type harness struct {
 	srv    *httptest.Server
 	now    time.Time
 	lang   ui.Lang
+	env    map[string]string
 	exe    string
 	exec   func(env []string, name string, args ...string) error
 	output func(env []string, name string, args ...string) ([]byte, error)
@@ -104,6 +105,9 @@ func (h *harness) run(args ...string) (int, string, string) {
 		Stdout: &out,
 		Stderr: &errb,
 		Getenv: func(k string) string {
+			if v, ok := h.env[k]; ok {
+				return v
+			}
 			return map[string]string{
 				"CODEX_REFRESH_TOKEN_URL_OVERRIDE": h.srv.URL + "/oauth/token",
 				"AGENTSWAP_CLAUDE_API_URL":         h.srv.URL,
@@ -183,9 +187,9 @@ func TestLinkWithoutExecutable(t *testing.T) {
 func TestEmptyListShowsFullAddCommand(t *testing.T) {
 	h := newHarness(t)
 	cases := map[string][]string{
-		"`cxswap add`":          {"cxswap"},
+		"`cxswap add`":          {"cxswap", "status"},
 		"`codexswap add`":       {"codexswap", "list"},
-		"`agentswap codex add`": {"agentswap", "codex"},
+		"`agentswap codex add`": {"agentswap", "codex", "status"},
 	}
 	for want, args := range cases {
 		_, out, _ := h.run(args...)
@@ -213,6 +217,17 @@ func TestVersion(t *testing.T) {
 			}
 		}
 	}
+	_, out, _ := h.run("ccswap", "version")
+	want := "agentswap test\n\n  Source  https://github.com/WellWells/agentswap\n  Author  WellsTsai · https://wellstsai.com\n"
+	if out != want {
+		t.Errorf("layout:\n%s", out)
+	}
+	h.lang = ui.ZhTW
+	_, out, _ = h.run("ccswap", "version")
+	want = "agentswap test\n\n  原始碼  https://github.com/WellWells/agentswap\n  作者    WellsTsai · https://wellstsai.com\n"
+	if out != want {
+		t.Errorf("zh layout:\n%s", out)
+	}
 }
 
 func TestAddListSwitchFlow(t *testing.T) {
@@ -226,7 +241,7 @@ func TestAddListSwitchFlow(t *testing.T) {
 		t.Fatalf("add bob: %q", errs)
 	}
 
-	_, out, _ := h.run("cxswap")
+	_, out, _ := h.run("cxswap", "status")
 	if !strings.Contains(out, "Codex · #1 work <alice@x.com>") || !strings.Contains(out, "Codex · #2 <bob@x.com> · plus  ● active") {
 		t.Fatalf("list:\n%s", out)
 	}
@@ -300,7 +315,7 @@ func setupTwo(t *testing.T, h *harness) {
 func TestListShowsUsageCards(t *testing.T) {
 	h := newHarness(t)
 	setupTwo(t, h)
-	code, out, errs := h.run("cxswap")
+	code, out, errs := h.run("cxswap", "status")
 	for _, want := range []string{
 		"Codex · #1 <alice@x.com> · plus\n\n5-hour limit\n",
 		"42% used\nResets ",
@@ -325,11 +340,11 @@ func TestSuggestsAccountWithMoreHeadroom(t *testing.T) {
 	h.run("cxswap", "add")
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
-	_, out, _ := h.run("cxswap")
+	_, out, _ := h.run("cxswap", "status")
 	if !strings.Contains(out, "Codex · #1 <bob@x.com> · prolite  ★ suggested: cxswap 1") {
 		t.Fatalf("cxswap:\n%s", out)
 	}
-	_, out, _ = h.run("agentswap")
+	_, out, _ = h.run("agentswap", "status")
 	if !strings.Contains(out, "★ suggested: agentswap codex 1") {
 		t.Fatalf("agentswap:\n%s", out)
 	}
@@ -341,7 +356,7 @@ func TestListTreatsElapsedWindowAsZero(t *testing.T) {
 	h.now = time.Unix(1791436850, 0).Add(time.Minute)
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
-	_, out, _ := h.run("cxswap")
+	_, out, _ := h.run("cxswap", "status")
 	if !strings.Contains(out, "5-hour limit\n") || !strings.Contains(out, "  0% used\n") || strings.Contains(out, "42% used") {
 		t.Fatalf("5h window after its reset:\n%s", out)
 	}
@@ -351,7 +366,7 @@ func TestListMarksUnavailableUsage(t *testing.T) {
 	h := newHarness(t)
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
-	code, out, _ := h.run("cxswap")
+	code, out, _ := h.run("cxswap", "status")
 	if code != 0 || !strings.Contains(out, "Usage unavailable (HTTP 500)") {
 		t.Fatalf("%d %q", code, out)
 	}
@@ -447,12 +462,12 @@ func TestSwitchReportsFailedDaemonRestart(t *testing.T) {
 
 func TestAgentswapOverview(t *testing.T) {
 	h := newHarness(t)
-	code, out, _ := h.run("agentswap")
+	code, out, _ := h.run("agentswap", "status")
 	if code != 0 || !strings.Contains(out, "No saved accounts yet") {
 		t.Fatalf("empty overview: %d %q", code, out)
 	}
 	setupTwo(t, h)
-	code, out, _ = h.run("agentswap")
+	code, out, _ = h.run("agentswap", "status")
 	if code != 0 || !strings.Contains(out, "Codex · #1 <alice@x.com>") || !strings.Contains(out, "Codex · #2 <bob@x.com>") {
 		t.Fatalf("overview: %d\n%s", code, out)
 	}
@@ -462,10 +477,25 @@ func TestAgentswapOverview(t *testing.T) {
 	}
 }
 
+func TestNoArgsShowsHelp(t *testing.T) {
+	h := newHarness(t)
+	setupTwo(t, h)
+	for _, args := range [][]string{{"cxswap"}, {"ccswap"}, {"agentswap"}, {"agentswap", "codex"}} {
+		code, out, errs := h.run(args...)
+		if code != 0 || errs != "" || !strings.HasPrefix(out, "Usage: ") || strings.Contains(out, "% used") {
+			t.Fatalf("%v: %d %q %q", args, code, out, errs)
+		}
+		_, help, _ := h.run(append(args, "help")...)
+		if out != help {
+			t.Fatalf("%v: no-args output differs from help:\n%s\n---\n%s", args, out, help)
+		}
+	}
+}
+
 func TestChineseMessages(t *testing.T) {
 	h := newHarness(t)
 	h.lang = ui.ZhTW
-	_, out, _ := h.run("cxswap")
+	_, out, _ := h.run("cxswap", "status")
 	if !strings.Contains(out, "尚未儲存任何 codex 帳號") {
 		t.Fatalf("empty list: %q", out)
 	}
@@ -525,12 +555,12 @@ func TestUsageViewPointsToList(t *testing.T) {
 	h := newHarness(t)
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
-	if _, out, _ := h.run("cxswap"); strings.Contains(out, "cxswap list") {
+	if _, out, _ := h.run("cxswap", "status"); strings.Contains(out, "cxswap list") {
 		t.Fatalf("single account needs no switch hint:\n%s", out)
 	}
 	h.login("bob@x.com", "u2", "a2")
 	h.run("cxswap", "add")
-	if _, out, _ := h.run("cxswap"); !strings.Contains(out, "`cxswap <number>`") || !strings.Contains(out, "`cxswap list`") {
+	if _, out, _ := h.run("cxswap", "status"); !strings.Contains(out, "`cxswap <number>`") || !strings.Contains(out, "`cxswap list`") {
 		t.Fatalf("missing switch hint:\n%s", out)
 	}
 }
@@ -642,7 +672,7 @@ const claudeUsageBody = `{"five_hour":{"utilization":30,"resets_at":"2026-10-08T
 func TestClaudeAddUsageSwitchFlow(t *testing.T) {
 	h := newHarness(t)
 	h.claude = map[string]string{"t1": claudeUsageBody, "t2": claudeUsageBody}
-	if code, out, _ := h.run("ccswap"); code != 0 || !strings.Contains(out, "ccswap add") || strings.Contains(out, "ccswap login") {
+	if code, out, _ := h.run("ccswap", "status"); code != 0 || !strings.Contains(out, "ccswap add") || strings.Contains(out, "ccswap login") {
 		t.Fatalf("empty: %d %q", code, out)
 	}
 	h.claudeLogin("u1", "o1", "a@x", "t1")
@@ -653,7 +683,7 @@ func TestClaudeAddUsageSwitchFlow(t *testing.T) {
 	if code, _, errs := h.run("ccswap", "add"); code != 0 {
 		t.Fatalf("%d %q", code, errs)
 	}
-	code, out, _ := h.run("ccswap")
+	code, out, _ := h.run("ccswap", "status")
 	if code != 0 || !strings.Contains(out, "Claude Code · #1 work <a@x>") || !strings.Contains(out, "30% used") {
 		t.Fatalf("%d %s", code, out)
 	}
@@ -674,7 +704,7 @@ func TestClaudeAddUsageSwitchFlow(t *testing.T) {
 			t.Fatalf("%s not sealed", s)
 		}
 	}
-	if code, out, _ := h.run("agentswap"); code != 0 || !strings.Contains(out, "Claude Code · #2 <b@x>") {
+	if code, out, _ := h.run("agentswap", "status"); code != 0 || !strings.Contains(out, "Claude Code · #2 <b@x>") {
 		t.Fatalf("overview %d %s", code, out)
 	}
 }
@@ -808,5 +838,96 @@ func TestHelpIsSpecificToEachCommand(t *testing.T) {
 		if !strings.Contains(out, w) {
 			t.Errorf("zh: missing %q in\n%s", w, out)
 		}
+	}
+}
+
+func TestLangShowsCurrentAndChoices(t *testing.T) {
+	h := newHarness(t)
+	code, out, _ := h.run("agentswap", "lang")
+	if code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	for _, w := range []string{"Language: English (en), follows the system locale", "  1  en         English   ● active\n", "  2  zh-TW/zht  正體中文\n", "  3  zh-CN/zhc  简体中文\n", "agentswap lang <number|code>", "agentswap lang auto"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in\n%s", w, out)
+		}
+	}
+}
+
+func TestLangSetPersistsAndAuto(t *testing.T) {
+	h := newHarness(t)
+	code, out, _ := h.run("agentswap", "language", "zhc")
+	if code != 0 || !strings.Contains(out, "界面语言已设置为 简体中文（zh-CN）") {
+		t.Fatalf("code %d: %s", code, out)
+	}
+	b, _ := os.ReadFile(filepath.Join(h.home, ".agentswap", "config.json"))
+	if !strings.Contains(string(b), `"lang": "zh-CN"`) {
+		t.Fatalf("config: %s", b)
+	}
+	_, out, _ = h.run("cxswap", "list")
+	if !strings.Contains(out, "尚未保存任何 codex 账号") {
+		t.Errorf("saved language not used: %s", out)
+	}
+	_, out, _ = h.run("agentswap", "lang")
+	if !strings.Contains(out, "由 `agentswap lang` 设置") || !strings.Contains(out, "3  zh-CN/zhc  简体中文  ● 使用中") {
+		t.Errorf("show: %s", out)
+	}
+	h.lang = ui.ZhTW
+	code, out, _ = h.run("agentswap", "lang", "auto")
+	if code != 0 || !strings.Contains(out, "介面語言恢復跟隨系統語系：正體中文（zh-TW）") {
+		t.Fatalf("auto: code %d: %s", code, out)
+	}
+	_, out, _ = h.run("agentswap", "lang")
+	if !strings.Contains(out, "跟隨系統語系") {
+		t.Errorf("after auto: %s", out)
+	}
+}
+
+func TestLangSetByNumber(t *testing.T) {
+	h := newHarness(t)
+	for n, want := range map[string]string{"2": "介面語言已設為 正體中文（zh-TW）", "3": "界面语言已设置为 简体中文（zh-CN）", "1": "Language set to English (en)"} {
+		code, out, _ := h.run("agentswap", "lang", n)
+		if code != 0 || !strings.Contains(out, want) {
+			t.Errorf("lang %s: code %d: %s", n, code, out)
+		}
+	}
+}
+
+func TestLangEnvOverridesSaved(t *testing.T) {
+	h := newHarness(t)
+	h.run("agentswap", "lang", "zh-TW")
+	h.env = map[string]string{"AGENTSWAP_LANG": "en"}
+	_, out, _ := h.run("cxswap", "list")
+	if !strings.Contains(out, "No saved codex accounts") {
+		t.Errorf("env should win: %s", out)
+	}
+	_, out, _ = h.run("agentswap", "lang", "zh-CN")
+	if !strings.Contains(out, "AGENTSWAP_LANG=en") {
+		t.Errorf("missing override warning: %s", out)
+	}
+	_, out, _ = h.run("agentswap", "lang")
+	if !strings.Contains(out, "set by AGENTSWAP_LANG") {
+		t.Errorf("show: %s", out)
+	}
+	h.env = map[string]string{"AGENTSWAP_LANG": "fr"}
+	_, out, _ = h.run("cxswap", "list")
+	if !strings.Contains(out, "尚未保存任何 codex 账号") {
+		t.Errorf("invalid AGENTSWAP_LANG should not hide the saved language: %s", out)
+	}
+}
+
+func TestLangRejectsUnknownCode(t *testing.T) {
+	h := newHarness(t)
+	for _, args := range [][]string{{"zh-HK"}, {"zhs"}, {"0"}, {"4"}, {"en", "zh-TW"}} {
+		code, _, errOut := h.run(append([]string{"agentswap", "lang"}, args...)...)
+		if code != 2 || errOut == "" {
+			t.Errorf("%v: code %d err %q", args, code, errOut)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(h.home, ".agentswap", "config.json")); err == nil {
+		t.Error("config written for an invalid code")
+	}
+	if code, _, _ := h.run("cxswap", "lang", "en"); code == 0 {
+		t.Error("lang should only be an agentswap command")
 	}
 }

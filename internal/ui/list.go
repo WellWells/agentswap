@@ -79,3 +79,20 @@ func List(w io.Writer, provider string, cards []Card, cmd func(Card) string, o O
 		fmt.Fprintln(w, line+action)
 	}
 }
+
+func LangList(w io.Writer, cur Lang, color bool) {
+	p := painter(color)
+	numW, codeW, nameW := len(strconv.Itoa(len(Langs))), 0, 0
+	for _, l := range Langs {
+		codeW = max(codeW, displayWidth(l.Codes()))
+		nameW = max(nameW, displayWidth(l.Name()))
+	}
+	for i, l := range Langs {
+		line := "  " + pad(strconv.Itoa(i+1), numW) + "  " + pad(l.Codes(), codeW) + "  "
+		if l == cur {
+			fmt.Fprintln(w, line+pad(l.Name(), nameW)+"  "+p.color(colorActive, cur.T("active")))
+		} else {
+			fmt.Fprintln(w, line+l.Name())
+		}
+	}
+}

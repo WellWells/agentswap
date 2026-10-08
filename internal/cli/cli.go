@@ -46,6 +46,8 @@ type Env struct {
 	GOOS    string
 	Run     execx.Runner
 	Vault   vault.Vault
+
+	autoLang ui.Lang
 }
 
 func (e Env) goos() string {
@@ -156,21 +158,24 @@ func Run(e Env) int {
 	prog := strings.ToLower(filepath.Base(strings.ReplaceAll(e.Args[0], `\`, "/")))
 	prog = strings.TrimSuffix(prog, ".exe")
 	args := e.Args[1:]
+	e = e.applySavedLang()
 	name, ok := lookup(prog)
 	if !ok {
 		switch {
-		case len(args) == 0:
-			return e.report("agentswap", provider{}, overview(e))
-		case isHelp(args[0]):
+		case len(args) == 0 || isHelp(args[0]):
 			fmt.Fprint(e.Stdout, e.usage("agentswap <provider>"))
 			return 0
 		case isVersion(args[0]):
 			printVersion(e)
 			return 0
+		case args[0] == "status" || args[0] == "current":
+			return e.report("agentswap", provider{}, overview(e))
 		case args[0] == "link":
 			return e.report("agentswap", provider{}, link(e))
 		case args[0] == "unlink":
 			return e.report("agentswap", provider{}, unlink(e))
+		case args[0] == "lang" || args[0] == "language":
+			return e.report("agentswap", provider{}, language(e, args[1:]))
 		}
 		if name, ok = lookup(strings.ToLower(args[0])); !ok {
 			fmt.Fprintln(e.Stderr, e.Lang.T("unknownProvider", args[0]))
@@ -251,7 +256,7 @@ func (e Env) report(prog string, p provider, err error) int {
 }
 
 func printVersion(e Env) {
-	fmt.Fprintf(e.Stdout, "agentswap %s\nhttps://github.com/WellWells/agentswap\nby WellsTsai · https://wellstsai.com\n", e.Version)
+	fmt.Fprint(e.Stdout, e.Lang.T("version", e.Version))
 }
 
 func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) error {
@@ -267,8 +272,9 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		return nil
 	}
 	switch {
-	case cmd == "":
-		return usageView(e, prog, p, m)
+	case cmd == "" || isHelp(cmd):
+		fmt.Fprint(e.Stdout, e.usageFor(p, prog))
+		return nil
 	case cmd == "list" || cmd == "ls":
 		return list(e, prog, p, m)
 	case cmd == "status" || cmd == "current":
@@ -332,9 +338,6 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		return withQuery(args[0], m.SetAlias(args[0], alias))
 	case isVersion(cmd):
 		printVersion(e)
-		return nil
-	case isHelp(cmd):
-		fmt.Fprint(e.Stdout, e.usageFor(p, prog))
 		return nil
 	case strings.HasPrefix(cmd, "--"):
 		return usageError(l.T("unknownFlag", cmd))
@@ -570,16 +573,7 @@ func status(e Env, prog string, p provider, m *swap.Manager, q string) error {
 		ui.Render(e.Stdout, []ui.Card{c}, e.options())
 		return nil
 	}
-	cards, err := e.cards(prog, p, m, true)
-	if err != nil {
-		return err
-	}
-	if len(cards) == 0 {
-		fmt.Fprintln(e.Stdout, e.Lang.T("notLoggedIn"))
-		return nil
-	}
-	ui.Render(e.Stdout, cards, e.options())
-	return nil
+	return usageView(e, prog, p, m)
 }
 
 func overview(e Env) error {

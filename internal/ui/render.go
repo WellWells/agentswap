@@ -127,7 +127,7 @@ func ResetLine(l Lang, t, now time.Time, zone string) string {
 	y1, m1, d1 := t.Date()
 	y2, m2, d2 := now.Date()
 	today := y1 == y2 && m1 == m2 && d1 == d2
-	if l == ZhTW {
+	if l != En {
 		clock := t.Format("15:04")
 		if today {
 			return "今天 " + clock + " 重置（" + label + "）"

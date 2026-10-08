@@ -34,16 +34,18 @@ The installers only ship `agentswap` and run `agentswap link`, which adds the pe
 
 ## Usage
 
+Run any command without arguments for its help. `agentswap status` shows the usage of every saved account of every agent.
+
 ```sh
 codex login            # log in to the first account
 cxswap add work        # save it
 cxswap login personal  # log in to another account and save it
 
-cxswap                 # usage of every saved account
+cxswap status          # usage of every saved account
+cxswap status 2        # usage of one account (number, alias or email)
 cxswap list            # account numbers and switch commands
 cxswap 2               # switch by number, alias or email
 cxswap -               # switch back
-cxswap status 2        # usage of one account (number, alias or email)
 cxswap alias 2 home
 cxswap rm 2
 ```
@@ -58,13 +60,17 @@ Restart Codex after switching, including `codex app-server daemon restart`. `COD
 ccswap add work        # save the account signed in to Claude Code now
 ccswap import          # or import accounts from another tool
 
-ccswap                 # usage of every saved account
+ccswap status          # usage of every saved account
 ccswap status work     # usage of one account
 ccswap list
 ccswap 2               # switch; running sessions follow on their next request
 ```
 
 Sign in to other accounts with Claude Code itself (`/login`), then run `ccswap add`. `CLAUDE_CONFIG_DIR` is respected, MCP and plugin tokens in `.credentials.json` stay with the machine, and only `oauthAccount` in `.claude.json` is replaced. On macOS the credentials are read from and written to the Keychain. Only Claude subscription logins are supported. After `ccswap import`, stop using cswap and run `cswap purge`: its files are only base64.
+
+### Language
+
+Messages follow the system language (English when it is not supported). `agentswap lang` lists the languages with numbers: `1` `en`, `2` `zh-TW`/`zht`, `3` `zh-CN`/`zhc`. `agentswap lang 2` or `agentswap lang zht` sets one, `agentswap lang auto` follows the system again, and `AGENTSWAP_LANG` overrides both.
 
 ### Storage
 

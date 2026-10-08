@@ -44,7 +44,7 @@ func main() {
 		Home:    home,
 		Exe:     exe,
 		Version: version,
-		Lang:    ui.DetectLang(os.Getenv, ui.SystemLocale()),
+		Lang:    ui.DetectLang(os.Getenv, ui.SystemLanguages),
 		Color:   color,
 		Width:   width,
 		Zone:    ui.DetectZone(os.Getenv),

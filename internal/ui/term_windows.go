@@ -10,21 +10,11 @@ import (
 
 var (
 	kernel32                       = syscall.NewLazyDLL("kernel32.dll")
-	procGetUserDefaultLocaleName   = kernel32.NewProc("GetUserDefaultLocaleName")
 	procSetConsoleMode             = kernel32.NewProc("SetConsoleMode")
 	procGetConsoleScreenBufferInfo = kernel32.NewProc("GetConsoleScreenBufferInfo")
 )
 
 const enableVirtualTerminalProcessing = 0x4
-
-func SystemLocale() string {
-	buf := make([]uint16, 85)
-	r, _, _ := procGetUserDefaultLocaleName.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
-	if r == 0 {
-		return ""
-	}
-	return syscall.UTF16ToString(buf)
-}
 
 func systemZone() string { return "" }
 
