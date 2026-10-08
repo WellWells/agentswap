@@ -457,12 +457,12 @@ func (e Env) cards(prog string, p provider, m *swap.Manager, all bool) ([]ui.Car
 	var cards []ui.Card
 	if all {
 		for i, a := range r.Accounts {
-			c := ui.Card{Provider: p.display, Number: i + 1, Alias: a.Alias, Email: a.Email, Plan: a.Plan, Active: a.Key == r.Active}
+			c := ui.Card{Provider: p.display, Number: i + 1, Alias: a.Alias, Email: a.Email, Plan: a.Plan, Active: a.Key == r.Active, Cmd: prog}
 			fill(&c, usage[a.Key])
 			cards = append(cards, c)
 		}
 		if st.LiveOK && r.Index(st.Live.Key) < 0 {
-			c := ui.Card{Provider: p.display, Email: st.Live.Email, Plan: st.Live.Plan, Active: true, Unsaved: prog + " add"}
+			c := ui.Card{Provider: p.display, Email: st.Live.Email, Plan: st.Live.Plan, Active: true, Unsaved: prog + " add", Cmd: prog}
 			fill(&c, usage[st.Live.Key])
 			cards = append(cards, c)
 		}

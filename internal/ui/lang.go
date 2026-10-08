@@ -94,6 +94,7 @@ var messages = map[string][3]string{
 	"limitMinutes": {"%d-minute limit", "%d 分鐘額度", "%d 分钟额度"},
 	"fallback":     {"From local session log · %s", "依本機 session 紀錄・%s", "根据本机 session 记录・%s"},
 	"zoneNote":     {"Reset times are in %s", "重置時間為 %s", "重置时间为 %s"},
+	"compactHint":  {"Reset times and details: `%s status <account>`", "重置時間與詳細資料：`%s status <帳號>`", "重置时间和详细信息：`%s status <账号>`"},
 	"loginExpired": {"Login expired, log in to this account again", "登入已失效，請重新登入此帳號", "登录已失效，请重新登录此账号"},
 	"noUsage":      {"No usage data for API key logins", "API key 登入沒有用量資料", "API key 登录没有用量数据"},
 	"unavailable":  {"Usage unavailable (%s)", "無法取得用量（%s）", "无法获取用量（%s）"},
