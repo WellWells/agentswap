@@ -34,12 +34,28 @@ type harness struct {
 	exe    string
 	exec   func(env []string, name string, args ...string) error
 	output func(env []string, name string, args ...string) ([]byte, error)
+
+	agy        []byte
+	agyRunning bool
+	agyUsage   map[string]string
 }
 
 func newHarness(t *testing.T) *harness {
 	home := t.TempDir()
-	h := &harness{t: t, home: home, codex: filepath.Join(home, ".codex"), usage: map[string]string{}, claude: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour)}
+	h := &harness{t: t, home: home, codex: filepath.Join(home, ".codex"), usage: map[string]string{}, claude: map[string]string{}, agyUsage: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour)}
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1internal:") {
+			body, ok := h.agyUsage[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+			if !ok {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			if r.URL.Path == "/v1internal:loadCodeAssist" {
+				body = `{"cloudaicompanionProject":"p","currentTier":{"id":"free-tier","name":"Free"},"paidTier":{"id":"g1-pro-tier","name":"Google AI Pro"}}`
+			}
+			io.WriteString(w, body)
+			return
+		}
 		if r.URL.Path == "/api/oauth/usage" {
 			body, ok := h.claude[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
 			if !ok {
@@ -112,8 +128,11 @@ func (h *harness) run(args ...string) (int, string, string) {
 				"CODEX_REFRESH_TOKEN_URL_OVERRIDE": h.srv.URL + "/oauth/token",
 				"AGENTSWAP_CLAUDE_API_URL":         h.srv.URL,
 				"AGENTSWAP_CLAUDE_TOKEN_URL":       h.srv.URL + "/v1/oauth/token",
+				"AGENTSWAP_ANTIGRAVITY_API_URL":    h.srv.URL,
+				"AGENTSWAP_ANTIGRAVITY_TOKEN_URL":  h.srv.URL + "/agy/token",
 			}[k]
 		},
+		Run:     h.runCmd,
 		Now:     func() time.Time { return h.now },
 		Home:    h.home,
 		Exe:     h.exe,
@@ -127,6 +146,32 @@ func (h *harness) run(args ...string) (int, string, string) {
 		Vault:   vault.WithKey(bytes.Repeat([]byte{9}, 32)),
 	})
 	return code, out.String(), errb.String()
+}
+
+func (h *harness) runCmd(stdin []byte, name string, args ...string) ([]byte, int, error) {
+	switch {
+	case name == "pgrep":
+		if h.agyRunning {
+			return nil, 0, nil
+		}
+		return nil, 1, nil
+	case name == "secret-tool" && args[0] == "lookup":
+		if h.agy == nil {
+			return nil, 1, nil
+		}
+		return h.agy, 0, nil
+	case name == "secret-tool" && args[0] == "store":
+		h.agy = append([]byte(nil), stdin...)
+		return nil, 0, nil
+	}
+	return nil, -1, errors.New("unexpected command " + name)
+}
+
+func (h *harness) agyLogin(sub, email, token string) {
+	enc := base64.RawURLEncoding
+	claims, _ := json.Marshal(map[string]any{"sub": sub, "email": email})
+	id := enc.EncodeToString([]byte("{}")) + "." + enc.EncodeToString(claims) + ".sig"
+	h.agy = []byte(`{"token":{"access_token":"` + token + `","token_type":"Bearer","refresh_token":"r-` + token + `","expiry":"2099-01-01T00:00:00Z"},"auth_method":"consumer","id_token":"` + id + `"}`)
 }
 
 func hasLine(out string, parts ...string) bool {
@@ -173,16 +218,16 @@ func TestLinkAndUnlinkCommands(t *testing.T) {
 	h.exe = filepath.Join(dir, "agentswap"+ext)
 	os.WriteFile(h.exe, []byte("bin"), 0o755)
 	code, out, errs := h.run("agentswap", "link")
-	if code != 0 || !strings.Contains(out, "Linked cxswap, codexswap, ccswap, claudeswap in "+dir) {
+	if code != 0 || !strings.Contains(out, "Linked cxswap, codexswap, ccswap, claudeswap, agswap, agyswap in "+dir) {
 		t.Fatalf("link: code=%d out=%q err=%q", code, out, errs)
 	}
-	for _, n := range []string{"cxswap", "codexswap", "ccswap", "claudeswap"} {
+	for _, n := range []string{"cxswap", "codexswap", "ccswap", "claudeswap", "agswap", "agyswap"} {
 		if b, err := os.ReadFile(filepath.Join(dir, n+ext)); err != nil || string(b) != "bin" {
 			t.Errorf("%s: %q %v", n, b, err)
 		}
 	}
 	code, out, _ = h.run("agentswap", "unlink")
-	if code != 0 || !strings.Contains(out, "Removed cxswap, codexswap, ccswap, claudeswap") {
+	if code != 0 || !strings.Contains(out, "Removed cxswap, codexswap, ccswap, claudeswap, agswap, agyswap") {
 		t.Fatalf("unlink: code=%d out=%q", code, out)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
@@ -931,5 +976,73 @@ func TestLangRejectsUnknownCode(t *testing.T) {
 	}
 	if code, _, _ := h.run("cxswap", "lang", "en"); code == 0 {
 		t.Error("lang should only be an agentswap command")
+	}
+}
+
+const agyQuota = `{"groups":[{"displayName":"Gemini","buckets":[{"bucketId":"gemini-5h","remainingFraction":0.7,"resetTime":"2026-10-08T12:00:00Z"},{"bucketId":"gemini-weekly","remainingFraction":0.9,"resetTime":"2026-10-12T00:00:00Z"}]}]}`
+
+func TestAntigravityAddUsageSwitchFlow(t *testing.T) {
+	h := newHarness(t)
+	h.agyUsage = map[string]string{"g1": agyQuota, "g2": agyQuota}
+	if code, out, _ := h.run("agswap", "status"); code != 0 || !strings.Contains(out, "No saved Antigravity accounts") || !strings.Contains(out, "`agswap add`") {
+		t.Fatalf("empty: %d %q", code, out)
+	}
+	h.agyLogin("s1", "a@gmail.com", "g1")
+	if code, out, errs := h.run("agswap", "add", "home"); code != 0 || !strings.Contains(out, "home <a@gmail.com>") {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	h.agyLogin("s2", "b@gmail.com", "g2")
+	if code, _, errs := h.run("agyswap", "add"); code != 0 {
+		t.Fatalf("%d %q", code, errs)
+	}
+	code, out, _ := h.run("agswap", "status")
+	if code != 0 || !strings.Contains(out, "Antigravity ───") || !hasLine(out, "#1 home <a@gmail.com> · Google AI Pro", "30%", "10%") {
+		t.Fatalf("%d %s", code, out)
+	}
+	before := append([]byte(nil), h.agy...)
+	h.agyRunning = true
+	code, _, errs := h.run("agswap", "home")
+	if code != 1 || !strings.Contains(errs, "agy is running") || !bytes.Equal(h.agy, before) {
+		t.Fatalf("running: %d %q %s", code, errs, h.agy)
+	}
+	h.agyRunning = false
+	code, out, errs = h.run("agentswap", "agy", "home")
+	if code != 0 || !strings.Contains(out, "Switched to home <a@gmail.com>") || !strings.Contains(out, "next agy you start") {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	if !strings.Contains(string(h.agy), `"access_token":"g1"`) {
+		t.Fatalf("live %s", h.agy)
+	}
+	if code, out, _ := h.run("agentswap", "status"); code != 0 || !strings.Contains(out, "Antigravity ───") || !strings.Contains(out, "#2 <b@gmail.com>") {
+		t.Fatalf("overview %d %s", code, out)
+	}
+	if code, out, _ := h.run("agentswap", "antigravity", "-"); code != 0 || !strings.Contains(out, "Switched to b@gmail.com") {
+		t.Fatalf("previous %d %s", code, out)
+	}
+}
+
+func TestAntigravityLoginAndHelp(t *testing.T) {
+	h := newHarness(t)
+	h.exec = func([]string, string, ...string) error { t.Fatal("ran a login command"); return nil }
+	code, _, errs := h.run("agswap", "login")
+	if code != 1 || !strings.Contains(errs, "sign in with agy") {
+		t.Fatalf("%d %q", code, errs)
+	}
+	_, out, _ := h.run("agswap", "help")
+	for _, w := range []string{"agswap status [account]", "close agy first", "agy remote-control", "agswap/agyswap"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in\n%s", w, out)
+		}
+	}
+	if strings.Contains(out, "agswap login") || strings.Contains(out, "import") {
+		t.Errorf("help %s", out)
+	}
+	if code, _, _ := h.run("agswap", "import"); code != 2 {
+		t.Fatalf("import code %d", code)
+	}
+	h.agyLogin("s1", "a@gmail.com", "")
+	h.agy = []byte(strings.Replace(string(h.agy), `"refresh_token":"r-"`, `"refresh_token":""`, 1))
+	if code, _, errs := h.run("agswap", "add"); code != 1 || !strings.Contains(errs, "no refresh token") {
+		t.Fatalf("unsupported %d %q", code, errs)
 	}
 }

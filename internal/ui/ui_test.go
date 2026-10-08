@@ -392,7 +392,7 @@ func TestStateFromError(t *testing.T) {
 
 func TestUsageColumnsAligned(t *testing.T) {
 	for _, l := range Langs {
-		for _, key := range []string{"usage", "usageClaude"} {
+		for _, key := range []string{"usage", "usageClaude", "usageAntigravity"} {
 			checkUsageColumns(t, l, l.T(key, "cxswap"), "  cxswap")
 		}
 		checkUsageColumns(t, l, l.T("usageAgentswap"), "  agentswap")
