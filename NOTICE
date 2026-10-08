@@ -1,0 +1,11 @@
+agentswap
+
+Copyright 2026 WellsTsai
+
+This product includes software developed by WellsTsai
+(<https://wellstsai.com/>).
+
+Source: <https://github.com/WellWells/agentswap>
+
+agentswap is built only with the Go standard library and has no
+third-party runtime dependencies.
