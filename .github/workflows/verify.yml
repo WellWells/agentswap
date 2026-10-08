@@ -54,7 +54,7 @@ jobs:
       VERSION: ${{ needs.dist.outputs.version }}
       AGENTSWAP_DOWNLOAD_URL: http://127.0.0.1:8765
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist
@@ -76,7 +76,7 @@ jobs:
           "$bin/agentswap" unlink
           test ! -e "$bin/cxswap"
       - if: runner.os == 'macOS'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: formula
       - if: runner.os == 'macOS'
@@ -114,7 +114,7 @@ jobs:
       run:
         shell: ${{ matrix.shell }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist
