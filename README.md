@@ -37,18 +37,20 @@ The installers only ship `agentswap` and run `agentswap link`, which adds the pe
 ```sh
 codex login            # log in to the first account
 cxswap add work        # save it
-codex login            # log in to another account (do not log out first)
-cxswap add personal
+cxswap login personal  # log in to another account and save it
 
-cxswap                 # list, * marks the active account
-cxswap work            # switch by alias, number or email
+cxswap                 # usage of every saved account
+cxswap list            # account numbers and switch commands
+cxswap 2               # switch by number, alias or email
 cxswap -               # switch back
 cxswap status
 cxswap alias 2 home
 cxswap rm 2
 ```
 
-Restart Codex after switching. Saved accounts live in `~/.agentswap/` (override with `AGENTSWAP_HOME`); `CODEX_HOME` is respected. Codex's `cli_auth_credentials_store = "keyring"` mode is not supported yet.
+Once an account is saved, do not run `codex login` or `codex logout` yourself: both revoke the tokens of the account that is signed in. `cxswap login` signs in from a temporary `CODEX_HOME`, so saved accounts stay valid.
+
+Restart Codex after switching, including `codex app-server daemon restart`. Saved accounts live in `~/.agentswap/` (override with `AGENTSWAP_HOME`); `CODEX_HOME` is respected. Codex's `cli_auth_credentials_store = "keyring"` mode is not supported yet.
 
 These files contain login tokens. Keep them private.
 

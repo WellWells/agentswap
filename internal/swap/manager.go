@@ -126,6 +126,36 @@ func (m *Manager) Add(alias string) (store.Account, error) {
 	return out, err
 }
 
+func (m *Manager) Import(raw []byte, alias string) (store.Account, error) {
+	var out store.Account
+	err := m.withRegistry(func(r *store.Registry, l live) error {
+		id, err := m.P.Identify(raw)
+		if err != nil {
+			return err
+		}
+		if alias != "" {
+			if err := validAlias(r, alias, id.Key); err != nil {
+				return err
+			}
+		}
+		if l.ok() && l.id.Key == id.Key && !bytes.Equal(l.raw, raw) {
+			if err := m.S.Backup(m.P.Name()+"-live", l.raw, 5); err != nil {
+				return err
+			}
+			if err := m.P.WriteLive(raw); err != nil {
+				return err
+			}
+		}
+		a, err := m.save(r, live{raw: raw, id: id}, alias)
+		if err != nil {
+			return err
+		}
+		out = a
+		return m.S.Save(r)
+	})
+	return out, err
+}
+
 func (m *Manager) Switch(q string) (store.Account, bool, error) {
 	var out store.Account
 	changed := false

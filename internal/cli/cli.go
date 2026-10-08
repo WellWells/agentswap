@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +35,8 @@ type Env struct {
 	Color   bool
 	Width   int
 	Zone    string
+	Exec    func(env []string, name string, args ...string) error
+	Output  func(env []string, name string, args ...string) ([]byte, error)
 }
 
 const usageTimeout = 10 * time.Second
@@ -54,6 +60,11 @@ type provider struct {
 	display   string
 	supported bool
 	login     string
+	loginCmd  []string
+	homeEnv   string
+	homeDir   string
+	homeCopy  []string
+	daemon    []string
 	hint      string
 	open      func(Env) swap.Provider
 }
@@ -61,7 +72,7 @@ type provider struct {
 var providerOrder = []string{"codex", "claude"}
 
 var providers = map[string]provider{
-	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", hint: "hintCodex", open: func(e Env) swap.Provider {
+	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", loginCmd: []string{"codex", "login"}, homeEnv: "CODEX_HOME", homeDir: ".codex", homeCopy: []string{"config.toml"}, daemon: []string{"codex", "app-server", "daemon"}, hint: "hintCodex", open: func(e Env) swap.Provider {
 		return codex.Provider{
 			Home:       e.dir("CODEX_HOME", ".codex"),
 			RefreshURL: e.Getenv("CODEX_REFRESH_TOKEN_URL_OVERRIDE"),
@@ -101,6 +112,11 @@ func commandNames() []string {
 
 func (e Env) manager(p provider) *swap.Manager {
 	return &swap.Manager{P: p.open(e), S: store.Store{Dir: filepath.Join(e.dir("AGENTSWAP_HOME", ".agentswap"), p.name)}}
+}
+
+func isNumber(s string) bool {
+	_, err := strconv.Atoi(strings.TrimSpace(s))
+	return err == nil
 }
 
 func isHelp(s string) bool    { return s == "help" || s == "-h" || s == "--help" }
@@ -175,6 +191,8 @@ func (e Env) report(prog string, p provider, err error) int {
 	switch {
 	case errors.As(err, &qe) && qe.query == "-" && errors.Is(err, store.ErrNotFound):
 		msg = l.T("noPrevious")
+	case errors.As(err, &qe) && errors.Is(err, store.ErrNotFound) && isNumber(qe.query):
+		msg = l.T("noNumber", qe.query, prog)
 	case errors.As(err, &qe) && errors.Is(err, store.ErrNotFound):
 		msg = l.T("notFound", qe.query)
 	case errors.As(err, &qe) && errors.Is(err, store.ErrAmbiguous):
@@ -207,7 +225,9 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		return nil
 	}
 	switch {
-	case cmd == "" || cmd == "list" || cmd == "ls":
+	case cmd == "":
+		return usageView(e, prog, p, m)
+	case cmd == "list" || cmd == "ls":
 		return list(e, prog, p, m)
 	case cmd == "status" || cmd == "current":
 		return status(e, prog, p, m)
@@ -222,6 +242,12 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		}
 		fmt.Fprintln(e.Stdout, l.T("saved", label(a)))
 		return nil
+	case cmd == "login":
+		alias := ""
+		if len(args) > 0 {
+			alias = args[0]
+		}
+		return login(e, prog, p, m, alias)
 	case cmd == "switch" || cmd == "use":
 		if err := need(1); err != nil {
 			return err
@@ -259,6 +285,66 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 	}
 }
 
+func login(e Env, prog string, p provider, m *swap.Manager, alias string) error {
+	if e.Exec == nil {
+		return errors.New(e.Lang.T("noExec"))
+	}
+	if _, err := p.open(e).ReadLive(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	base := e.dir("AGENTSWAP_HOME", ".agentswap")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(base, p.name+"-login-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	live := e.dir(p.homeEnv, p.homeDir)
+	for _, name := range p.homeCopy {
+		b, err := os.ReadFile(filepath.Join(live, name))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(tmp, name), b, 0o600); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintln(e.Stdout, e.Lang.T("loginStart"))
+	if err := e.Exec([]string{p.homeEnv + "=" + tmp}, p.loginCmd[0], p.loginCmd[1:]...); err != nil {
+		return fmt.Errorf("%s: %w", p.login, err)
+	}
+	isolated := e
+	isolated.Getenv = func(k string) string {
+		if k == p.homeEnv {
+			return tmp
+		}
+		return e.Getenv(k)
+	}
+	raw, err := p.open(isolated).ReadLive()
+	if errors.Is(err, os.ErrNotExist) {
+		return errors.New(e.Lang.T("loginNoAuth"))
+	}
+	if err != nil {
+		return err
+	}
+	a, err := m.Import(raw, alias)
+	if err != nil {
+		return err
+	}
+	st, err := m.Status()
+	if err != nil {
+		return err
+	}
+	n := st.Registry.Index(a.Key) + 1
+	fmt.Fprintln(e.Stdout, e.Lang.T("loginSaved", label(a), n, prog))
+	return nil
+}
+
 func doSwitch(e Env, p provider, m *swap.Manager, q string) error {
 	a, changed, err := m.Switch(q)
 	if err != nil {
@@ -269,8 +355,30 @@ func doSwitch(e Env, p provider, m *swap.Manager, q string) error {
 		return nil
 	}
 	fmt.Fprintln(e.Stdout, e.Lang.T("switched", label(a)))
+	restartDaemon(e, p)
 	fmt.Fprintln(e.Stdout, e.Lang.T(p.hint))
 	return nil
+}
+
+func restartDaemon(e Env, p provider) {
+	if e.Output == nil || len(p.daemon) == 0 {
+		return
+	}
+	daemonCmd := func(sub string) []string { return append(append([]string{}, p.daemon...), sub) }
+	version := daemonCmd("version")
+	b, err := e.Output(nil, version[0], version[1:]...)
+	var st struct {
+		Status string `json:"status"`
+	}
+	if err != nil || json.Unmarshal(bytes.TrimSpace(b), &st) != nil || st.Status != "running" {
+		return
+	}
+	restart := daemonCmd("restart")
+	if _, err := e.Output(nil, restart[0], restart[1:]...); err != nil {
+		fmt.Fprintln(e.Stdout, e.Lang.T("restartFailed", err, strings.Join(restart, " ")))
+		return
+	}
+	fmt.Fprintln(e.Stdout, e.Lang.T("restarted"))
 }
 
 func (e Env) options() ui.Options {
@@ -290,6 +398,11 @@ func (e Env) cards(prog string, p provider, m *swap.Manager, all bool) ([]ui.Car
 		for i, a := range r.Accounts {
 			c := ui.Card{Provider: p.display, Number: i + 1, Alias: a.Alias, Email: a.Email, Plan: a.Plan, Active: a.Key == r.Active}
 			fill(&c, usage[a.Key])
+			cards = append(cards, c)
+		}
+		if st.LiveOK && r.Index(st.Live.Key) < 0 {
+			c := ui.Card{Provider: p.display, Email: st.Live.Email, Plan: st.Live.Plan, Active: true, Unsaved: prog + " add"}
+			fill(&c, usage[st.Live.Key])
 			cards = append(cards, c)
 		}
 		return cards, nil
@@ -334,7 +447,11 @@ func shortError(err error) string {
 	return err.Error()
 }
 
-func list(e Env, prog string, p provider, m *swap.Manager) error {
+func switchCmd(prog string) func(ui.Card) string {
+	return func(c ui.Card) string { return fmt.Sprintf("%s %d", prog, c.Number) }
+}
+
+func usageView(e Env, prog string, p provider, m *swap.Manager) error {
 	cards, err := e.cards(prog, p, m, true)
 	if err != nil {
 		return err
@@ -343,13 +460,43 @@ func list(e Env, prog string, p provider, m *swap.Manager) error {
 		fmt.Fprintln(e.Stdout, e.Lang.T("emptyProvider", p.name, p.login, prog))
 		return nil
 	}
-	ui.MarkSuggestions(cards, e.now(), func(c ui.Card) string { return fmt.Sprintf("%s %d", prog, c.Number) })
+	ui.MarkSuggestions(cards, e.now(), switchCmd(prog))
 	ui.Render(e.Stdout, cards, e.options())
+	if len(cards) > 1 {
+		fmt.Fprintln(e.Stdout)
+		fmt.Fprintln(e.Stdout, e.Lang.T("usageHint", prog))
+	}
+	return nil
+}
+
+func list(e Env, prog string, p provider, m *swap.Manager) error {
+	st, err := m.Status()
+	if err != nil {
+		return err
+	}
+	r := st.Registry
+	if len(r.Accounts) == 0 {
+		fmt.Fprintln(e.Stdout, e.Lang.T("emptyProvider", p.name, p.login, prog))
+		return nil
+	}
+	var cards []ui.Card
+	for i, a := range r.Accounts {
+		cards = append(cards, ui.Card{Provider: p.display, Number: i + 1, Alias: a.Alias, Email: a.Email, Plan: a.Plan, Active: a.Key == r.Active})
+	}
+	if st.LiveOK && r.Index(st.Live.Key) < 0 {
+		cards = append(cards, ui.Card{Provider: p.display, Email: st.Live.Email, Plan: st.Live.Plan, Active: true, Unsaved: prog + " add"})
+	}
+	ui.List(e.Stdout, p.display, cards, switchCmd(prog), e.options())
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, e.Lang.T("listHelp", prog))
+	if len(r.Accounts) == 1 {
+		fmt.Fprintln(e.Stdout, e.Lang.T("listAddMore", prog, p.login))
+	}
 	return nil
 }
 
 func status(e Env, prog string, p provider, m *swap.Manager) error {
-	cards, err := e.cards(prog, p, m, false)
+	cards, err := e.cards(prog, p, m, true)
 	if err != nil {
 		return err
 	}
@@ -372,7 +519,7 @@ func overview(e Env) error {
 		if err != nil {
 			return err
 		}
-		ui.MarkSuggestions(cards, e.now(), func(c ui.Card) string { return fmt.Sprintf("agentswap %s %d", name, c.Number) })
+		ui.MarkSuggestions(cards, e.now(), switchCmd("agentswap "+name))
 		all = append(all, cards...)
 	}
 	if len(all) == 0 {

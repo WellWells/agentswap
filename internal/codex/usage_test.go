@@ -235,8 +235,9 @@ func rateLine(ts string, primary int) string {
 }
 
 func TestUsageFallsBackToSessionLog(t *testing.T) {
-	b := newBackend(t)
-	p := b.provider(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
+	defer srv.Close()
+	p := Provider{Home: t.TempDir(), BaseURL: srv.URL + "/backend-api", Now: func() time.Time { return now }}
 	writeSession(t, p.Home, "07T09-00-00", "user-1", "acct-1", rateLine("2026-10-07T09:00:00Z", 50))
 	writeSession(t, p.Home, "08T01-00-00", "user-1", "acct-1",
 		rateLine("2026-10-08T01:00:00Z", 10),
@@ -292,5 +293,26 @@ func TestUsageDoesNotRetryClientErrors(t *testing.T) {
 	tok := accessToken("a", now.Add(240*time.Hour))
 	if _, _, err := p.Usage(context.Background(), authJSON(tok, "rt", "user-1", "acct-1"), true); err == nil || calls.Load() != 1 {
 		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+}
+
+func TestRevokedActiveTokenReportsLoginExpired(t *testing.T) {
+	b := newBackend(t)
+	p := b.provider(t)
+	writeSession(t, p.Home, "08T01-00-00", "user-1", "acct-1", rateLine("2026-10-08T01:00:00Z", 10))
+	tok := accessToken("revoked", now.Add(240*time.Hour))
+	if _, _, err := p.Usage(context.Background(), authJSON(tok, "rt", "user-1", "acct-1"), true); !errors.Is(err, ErrLoginExpired) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestStill401AfterRefreshReportsLoginExpired(t *testing.T) {
+	b := newBackend(t)
+	b.refresh = func(w http.ResponseWriter, req map[string]string) {
+		fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"rt-2"}`, accessToken("also-bad", now.Add(240*time.Hour)))
+	}
+	tok := accessToken("stale", now.Add(240*time.Hour))
+	if _, _, err := b.provider(t).Usage(context.Background(), authJSON(tok, "rt", "user-1", "acct-1"), false); !errors.Is(err, ErrLoginExpired) {
+		t.Fatalf("got %v", err)
 	}
 }

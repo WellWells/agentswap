@@ -194,7 +194,7 @@ func Render(w io.Writer, cards []Card, o Options) {
 func header(c Card, l Lang, p painter) string {
 	h := c.Provider + " · "
 	if c.Number > 0 {
-		h += strconv.Itoa(c.Number) + " "
+		h += "#" + strconv.Itoa(c.Number) + " "
 	}
 	if c.Alias != "" {
 		h += c.Alias + " "

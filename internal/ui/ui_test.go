@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -143,9 +144,12 @@ func TestAgo(t *testing.T) {
 
 func TestWindowName(t *testing.T) {
 	cases := map[int][2]string{
-		300:   {"Current session", "目前工作階段"},
-		10080: {"Current week", "本週額度"},
-		4320:  {"Current 3d window", "目前 3 天視窗"},
+		300:   {"5-hour limit", "5 小時額度"},
+		60:    {"1-hour limit", "1 小時額度"},
+		1440:  {"1-day limit", "1 天額度"},
+		10080: {"Weekly limit", "本週額度"},
+		4320:  {"3-day limit", "3 天額度"},
+		90:    {"90-minute limit", "90 分鐘額度"},
 	}
 	for m, want := range cases {
 		if En.WindowName(m) != want[0] || ZhTW.WindowName(m) != want[1] {
@@ -179,11 +183,11 @@ func TestRenderPlainCards(t *testing.T) {
 	Render(&buf, cards, Options{Lang: En, Width: 80, Now: now})
 	out := buf.String()
 	for _, want := range []string{
-		"Codex · 1 main <jora@x.com> · prolite  ● active\n\nCurrent week\n",
+		"Codex · #1 main <jora@x.com> · prolite  ● active\n\nWeekly limit\n",
 		"76% used\nResets Oct 14, 5:41pm (UTC+8)\n",
-		"Codex · 2 work <boss@x.com> · plus  ★ suggested: cxswap 2\n\nCurrent session\n",
-		"42% used\nResets 1:20pm (UTC+8)\n\nCurrent week\n",
-		"Codex · 3 <old@x.com>\n\nLogin expired",
+		"Codex · #2 work <boss@x.com> · plus  ★ suggested: cxswap 2\n\n5-hour limit\n",
+		"42% used\nResets 1:20pm (UTC+8)\n\nWeekly limit\n",
+		"Codex · #3 <old@x.com>\n\nLogin expired",
 		"From local session log · 3h ago",
 		"No usage data for API key logins",
 		"Usage unavailable (HTTP 500)",
@@ -195,7 +199,7 @@ func TestRenderPlainCards(t *testing.T) {
 	if strings.Contains(out, "\x1b[") {
 		t.Error("escape codes without color")
 	}
-	bar := strings.Split(strings.Split(out, "Current week\n")[1], "  ")[0]
+	bar := strings.Split(strings.Split(out, "Weekly limit\n")[1], "  ")[0]
 	if n := len([]rune(bar)); n != 50 {
 		t.Errorf("bar width %d: %q", n, bar)
 	}
@@ -260,18 +264,6 @@ func TestStateFromError(t *testing.T) {
 	}
 }
 
-func displayWidth(s string) int {
-	w := 0
-	for _, r := range s {
-		if r >= 0x1100 && (r <= 0x115f || (r >= 0x2e80 && r <= 0xa4cf) || (r >= 0xac00 && r <= 0xd7a3) || (r >= 0xf900 && r <= 0xfaff) || (r >= 0xfe30 && r <= 0xfe4f) || (r >= 0xff00 && r <= 0xff60)) {
-			w += 2
-		} else {
-			w++
-		}
-	}
-	return w
-}
-
 func TestUsageColumnsAligned(t *testing.T) {
 	for _, l := range []Lang{En, ZhTW} {
 		col := -1
@@ -286,6 +278,56 @@ func TestUsageColumnsAligned(t *testing.T) {
 			} else if w != col {
 				t.Errorf("lang %d: %q starts at column %d, want %d", l, line, w, col)
 			}
+		}
+	}
+}
+
+func TestRenderList(t *testing.T) {
+	cards := []Card{
+		{Provider: "Codex", Number: 1, Alias: "工作", Email: "jora@x.com", Plan: "prolite", Active: true},
+		{Provider: "Codex", Number: 2, Email: "boss@x.com", Plan: "plus"},
+		{Provider: "Codex", Email: "new@x.com", Unsaved: "cxswap add"},
+	}
+	cmd := func(c Card) string { return "cxswap " + strconv.Itoa(c.Number) }
+	var buf bytes.Buffer
+	List(&buf, "Codex", cards, cmd, Options{Lang: En, Width: 80})
+	want := strings.Join([]string{
+		"Codex accounts",
+		"",
+		"  #  Account            Plan     Switch with",
+		"  1  工作 <jora@x.com>  prolite  ● active",
+		"  2  <boss@x.com>       plus     cxswap 2",
+		"  -  <new@x.com>                 not saved, run `cxswap add`",
+		"",
+	}, "\n")
+	if buf.String() != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", buf.String(), want)
+	}
+	buf.Reset()
+	List(&buf, "Codex", cards[:2], cmd, Options{Lang: ZhTW, Width: 80, Color: true})
+	out := buf.String()
+	for _, want := range []string{"Codex 帳號", "編號", "切換指令", "● 使用中", "\x1b["} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	buf.Reset()
+	List(&buf, "Codex", cards[:2], cmd, Options{Lang: ZhTW, Width: 80})
+	col := -1
+	for _, line := range strings.Split(buf.String(), "\n")[2:5] {
+		i := strings.LastIndex(line, "  ")
+		if w := displayWidth(line[:i+2]); col == -1 {
+			col = w
+		} else if w != col {
+			t.Errorf("%q: last column at %d, want %d", line, w, col)
+		}
+	}
+}
+
+func TestDisplayWidth(t *testing.T) {
+	for s, want := range map[string]int{"abc": 3, "工作": 4, "編號 1": 6, "（三）": 6} {
+		if got := displayWidth(s); got != want {
+			t.Errorf("displayWidth(%q) = %d, want %d", s, got, want)
 		}
 	}
 }
