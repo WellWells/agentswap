@@ -10,7 +10,7 @@ Switch between multiple accounts of AI coding agents from one small binary. No N
 |---|---|---|
 | OpenAI Codex | `cxswap`, `codexswap`, `agentswap codex` | supported |
 | Claude Code | `ccswap`, `claudeswap`, `agentswap claude` | supported |
-| Antigravity | | planned |
+| Antigravity CLI (`agy`) | `agswap`, `agyswap`, `agentswap antigravity` | supported |
 
 ## Install
 
@@ -67,6 +67,17 @@ ccswap 2               # switch; running sessions follow on their next request
 ```
 
 Sign in to other accounts with Claude Code itself (`/login`), then run `ccswap add`. `CLAUDE_CONFIG_DIR` is respected, MCP and plugin tokens in `.credentials.json` stay with the machine, and only `oauthAccount` in `.claude.json` is replaced. On macOS the credentials are read from and written to the Keychain. Only Claude subscription logins are supported. After `ccswap import`, stop using cswap and run `cswap purge`: its files are only base64.
+
+### Antigravity CLI
+
+```sh
+agswap add work        # save the account signed in to agy now
+agswap status          # usage of every saved account
+agswap list
+agswap 2               # switch; close every agy first
+```
+
+Sign in to other accounts in agy itself, then run `agswap add`. The login lives in the OS keyring (`gemini:antigravity`: Credential Manager on Windows, Keychain on macOS, Secret Service via `secret-tool` on Linux). agy reads it only when it starts and may write its own account back while running, so `agswap` refuses to switch while any `agy` process is running, including `agy remote-control`. The desktop app is not supported yet.
 
 ### Language
 

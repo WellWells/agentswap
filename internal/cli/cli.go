@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/WellWells/agentswap/internal/antigravity"
 	"github.com/WellWells/agentswap/internal/claude"
 	"github.com/WellWells/agentswap/internal/codex"
 	"github.com/WellWells/agentswap/internal/execx"
@@ -85,6 +86,7 @@ type provider struct {
 	display   string
 	supported bool
 	login     string
+	official  string
 	loginCmd  []string
 	homeEnv   string
 	homeDir   string
@@ -97,7 +99,7 @@ type provider struct {
 	open      func(Env) swap.Provider
 }
 
-var providerOrder = []string{"codex", "claude"}
+var providerOrder = []string{"codex", "claude", "antigravity"}
 
 var providers = map[string]provider{
 	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", loginCmd: []string{"codex", "login"}, homeEnv: "CODEX_HOME", homeDir: ".codex", homeCopy: []string{"config.toml"}, daemon: []string{"codex", "app-server", "daemon"}, hint: "hintCodex", usage: "usage", empty: "emptyProvider", addMore: "listAddMore", open: func(e Env) swap.Provider {
@@ -107,8 +109,13 @@ var providers = map[string]provider{
 			UserAgent:  "agentswap/" + e.Version,
 		}
 	}},
-	"claude": {name: "claude", display: "Claude Code", supported: true, login: "claude auth login", hint: "hintClaude", usage: "usageClaude", empty: "emptyClaude", addMore: "listAddMoreClaude", open: func(e Env) swap.Provider {
+	"claude": {name: "claude", display: "Claude Code", supported: true, login: "claude auth login", official: "loginOfficial", hint: "hintClaude", usage: "usageClaude", empty: "emptyClaude", addMore: "listAddMoreClaude", open: func(e Env) swap.Provider {
 		p := claude.New(e.Getenv, e.Home, e.goos(), e.Run)
+		p.UserAgent = "agentswap/" + e.Version
+		return p
+	}},
+	"antigravity": {name: "antigravity", display: "Antigravity", supported: true, login: "agy", official: "loginAgy", hint: "hintAntigravity", usage: "usageAntigravity", empty: "emptyAntigravity", addMore: "listAddMoreAntigravity", open: func(e Env) swap.Provider {
+		p := antigravity.New(e.Getenv, e.goos(), e.Run)
 		p.UserAgent = "agentswap/" + e.Version
 		return p
 	}},
@@ -117,11 +124,13 @@ var providers = map[string]provider{
 var commands = []struct{ name, provider string }{
 	{"cxswap", "codex"}, {"codexswap", "codex"},
 	{"ccswap", "claude"}, {"claudeswap", "claude"},
+	{"agswap", "antigravity"}, {"agyswap", "antigravity"},
 }
 
 var aliases = map[string]string{
 	"codex": "codex", "cx": "codex",
 	"claude": "claude", "cc": "claude",
+	"antigravity": "antigravity", "agy": "antigravity", "ag": "antigravity",
 }
 
 func lookup(s string) (string, bool) {
@@ -246,6 +255,10 @@ func (e Env) report(prog string, p provider, err error) int {
 		msg = l.T("claudeUnsupported")
 	case errors.Is(err, claude.ErrWiped):
 		msg = l.T("claudeWiped")
+	case errors.Is(err, antigravity.ErrRunning):
+		msg = l.T("agyRunning")
+	case errors.Is(err, antigravity.ErrUnsupportedLogin):
+		msg = l.T("agyUnsupported")
 	case errors.Is(err, vault.ErrKey):
 		msg = l.T("vaultKey")
 	case errors.Is(err, vault.ErrCorrupt):
@@ -296,7 +309,7 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		return nil
 	case cmd == "login":
 		if len(p.loginCmd) == 0 {
-			return errors.New(l.T("loginOfficial", prog))
+			return errors.New(l.T(p.official, prog))
 		}
 		alias := ""
 		if len(args) > 0 {
@@ -482,9 +495,10 @@ func (e Env) cards(prog string, p provider, m *swap.Manager, all bool) ([]ui.Car
 
 func fill(c *ui.Card, res swap.UsageResult) {
 	c.State, c.Detail = ui.Classify(res.Err, map[error]ui.State{
-		codex.ErrLoginExpired:  ui.LoginExpired,
-		codex.ErrNoUsage:       ui.NoUsage,
-		claude.ErrLoginExpired: ui.LoginExpired,
+		codex.ErrLoginExpired:       ui.LoginExpired,
+		codex.ErrNoUsage:            ui.NoUsage,
+		claude.ErrLoginExpired:      ui.LoginExpired,
+		antigravity.ErrLoginExpired: ui.LoginExpired,
 	})
 	if c.State == ui.Unavailable {
 		c.Detail = shortError(res.Err)
