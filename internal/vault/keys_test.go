@@ -53,7 +53,7 @@ func (f *fakeRunner) run(stdin []byte, name string, args ...string) ([]byte, int
 
 func TestDarwinKeychainCreatesAndReusesKey(t *testing.T) {
 	f := &fakeRunner{secrets: map[string]string{}}
-	sealed, err := newDarwin(f.run).Seal([]byte("x"))
+	sealed, err := newDarwin(t.TempDir(), f.run).Seal([]byte("x"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestDarwinKeychainCreatesAndReusesKey(t *testing.T) {
 			t.Fatalf("key leaked into argv: %s", c)
 		}
 	}
-	got, err := newDarwin(f.run).Open(sealed)
+	got, err := newDarwin(t.TempDir(), f.run).Open(sealed)
 	if err != nil || string(got) != "x" {
 		t.Fatalf("reopen: %q %v", got, err)
 	}
@@ -73,10 +73,41 @@ func TestDarwinKeychainCreatesAndReusesKey(t *testing.T) {
 
 func TestDarwinMissingKeyIsErrKey(t *testing.T) {
 	f := &fakeRunner{secrets: map[string]string{}}
-	sealed, _ := newDarwin(f.run).Seal([]byte("x"))
+	dir := t.TempDir()
+	sealed, _ := newDarwin(dir, f.run).Seal([]byte("x"))
 	delete(f.secrets, "keychain")
-	if _, err := newDarwin(f.run).Open(sealed); !errors.Is(err, ErrKey) {
+	if _, err := newDarwin(dir, f.run).Open(sealed); !errors.Is(err, ErrKey) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLostKeyringKeyIsNeverRecreated(t *testing.T) {
+	dir := t.TempDir()
+	f := &fakeRunner{secrets: map[string]string{}}
+	if _, err := newDarwin(dir, f.run).Seal([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	delete(f.secrets, "keychain")
+	if _, err := newDarwin(dir, f.run).Seal([]byte("y")); !errors.Is(err, ErrKey) {
+		t.Fatalf("darwin err = %v", err)
+	}
+	if _, ok := f.secrets["keychain"]; ok {
+		t.Fatal("darwin key was recreated")
+	}
+	ldir := t.TempDir()
+	g := &fakeRunner{secrets: map[string]string{}}
+	if _, err := newLinux(ldir, &bytes.Buffer{}, g.run, func() string { return "m" }).Seal([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	delete(g.secrets, "secret")
+	if _, err := newLinux(ldir, &bytes.Buffer{}, g.run, func() string { return "m" }).Seal([]byte("y")); !errors.Is(err, ErrKey) {
+		t.Fatalf("linux err = %v", err)
+	}
+	if _, ok := g.secrets["secret"]; ok {
+		t.Fatal("linux key was recreated")
+	}
+	if _, err := os.Stat(filepath.Join(ldir, ".key")); err == nil {
+		t.Fatal("fell back to a key file while keyring data exists")
 	}
 }
 

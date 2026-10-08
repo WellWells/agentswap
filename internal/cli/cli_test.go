@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/WellWells/agentswap/internal/ui"
+	"github.com/WellWells/agentswap/internal/vault"
 )
 
 type harness struct {
@@ -23,6 +25,8 @@ type harness struct {
 	home   string
 	codex  string
 	usage  map[string]string
+	claude map[string]string
+	stdin  string
 	srv    *httptest.Server
 	now    time.Time
 	lang   ui.Lang
@@ -33,8 +37,17 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	home := t.TempDir()
-	h := &harness{t: t, home: home, codex: filepath.Join(home, ".codex"), usage: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour)}
+	h := &harness{t: t, home: home, codex: filepath.Join(home, ".codex"), usage: map[string]string{}, claude: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour)}
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/oauth/usage" {
+			body, ok := h.claude[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+			if !ok {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			io.WriteString(w, body)
+			return
+		}
 		body, ok := h.usage[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
 		if r.URL.Path != "/backend-api/wham/usage" || !ok {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -91,7 +104,11 @@ func (h *harness) run(args ...string) (int, string, string) {
 		Stdout: &out,
 		Stderr: &errb,
 		Getenv: func(k string) string {
-			return map[string]string{"CODEX_REFRESH_TOKEN_URL_OVERRIDE": h.srv.URL + "/oauth/token"}[k]
+			return map[string]string{
+				"CODEX_REFRESH_TOKEN_URL_OVERRIDE": h.srv.URL + "/oauth/token",
+				"AGENTSWAP_CLAUDE_API_URL":         h.srv.URL,
+				"AGENTSWAP_CLAUDE_TOKEN_URL":       h.srv.URL + "/v1/oauth/token",
+			}[k]
 		},
 		Now:     func() time.Time { return h.now },
 		Home:    h.home,
@@ -101,6 +118,9 @@ func (h *harness) run(args ...string) (int, string, string) {
 		Width:   80,
 		Exec:    h.exec,
 		Output:  h.output,
+		Stdin:   strings.NewReader(h.stdin),
+		GOOS:    "linux",
+		Vault:   vault.WithKey(bytes.Repeat([]byte{9}, 32)),
 	})
 	return code, out.String(), errb.String()
 }
@@ -171,16 +191,6 @@ func TestEmptyListShowsFullAddCommand(t *testing.T) {
 		_, out, _ := h.run(args...)
 		if !strings.Contains(out, want) {
 			t.Errorf("%v: want %s in %q", args, want, out)
-		}
-	}
-}
-
-func TestClaudeNotYetSupported(t *testing.T) {
-	h := newHarness(t)
-	for _, args := range [][]string{{"ccswap"}, {"claudeswap", "list"}, {"agentswap", "claude"}} {
-		code, _, errs := h.run(args...)
-		if code != 2 || !strings.Contains(errs, "not supported yet") {
-			t.Errorf("%v: code=%d err=%q", args, code, errs)
 		}
 	}
 }
@@ -615,5 +625,129 @@ func TestLoginRefusesKeyringStore(t *testing.T) {
 	h.exec = func(env []string, name string, args ...string) error { ran = true; return nil }
 	if code, _, errs := h.run("cxswap", "login"); code != 1 || ran || !strings.Contains(errs, "keyring") {
 		t.Fatalf("%d ran=%v %q", code, ran, errs)
+	}
+}
+
+func (h *harness) claudeLogin(uuid, org, email, token string) {
+	dir := filepath.Join(h.home, ".claude")
+	os.MkdirAll(dir, 0o700)
+	creds := `{"claudeAiOauth":{"accessToken":"` + token + `","refreshToken":"r-` + token + `","expiresAt":9999999999999,"subscriptionType":"max"},"mcpOAuth":{"keep":true}}`
+	os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(creds), 0o600)
+	cfg := `{"oauthAccount":{"accountUuid":"` + uuid + `","organizationUuid":"` + org + `","emailAddress":"` + email + `"},"projects":{"p":1}}`
+	os.WriteFile(filepath.Join(h.home, ".claude.json"), []byte(cfg), 0o600)
+}
+
+const claudeUsageBody = `{"five_hour":{"utilization":30,"resets_at":"2026-10-08T12:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2026-10-12T00:00:00Z"}}`
+
+func TestClaudeAddUsageSwitchFlow(t *testing.T) {
+	h := newHarness(t)
+	h.claude = map[string]string{"t1": claudeUsageBody, "t2": claudeUsageBody}
+	if code, out, _ := h.run("ccswap"); code != 0 || !strings.Contains(out, "ccswap add") || strings.Contains(out, "ccswap login") {
+		t.Fatalf("empty: %d %q", code, out)
+	}
+	h.claudeLogin("u1", "o1", "a@x", "t1")
+	if code, out, errs := h.run("ccswap", "add", "work"); code != 0 || !strings.Contains(out, "work <a@x> [max]") {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	h.claudeLogin("u2", "o2", "b@x", "t2")
+	if code, _, errs := h.run("ccswap", "add"); code != 0 {
+		t.Fatalf("%d %q", code, errs)
+	}
+	code, out, _ := h.run("ccswap")
+	if code != 0 || !strings.Contains(out, "Claude Code · #1 work <a@x>") || !strings.Contains(out, "30% used") {
+		t.Fatalf("%d %s", code, out)
+	}
+	if code, out, errs := h.run("ccswap", "work"); code != 0 || !strings.Contains(out, "Switched to work <a@x>") || !strings.Contains(out, "Claude Code") {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	cfg, _ := os.ReadFile(filepath.Join(h.home, ".claude.json"))
+	creds, _ := os.ReadFile(filepath.Join(h.home, ".claude", ".credentials.json"))
+	if !strings.Contains(string(cfg), `"u1"`) || !strings.Contains(string(cfg), `"projects":{"p":1}`) || !strings.Contains(string(creds), `"mcpOAuth":{"keep":true}`) || !strings.Contains(string(creds), `"t1"`) {
+		t.Fatalf("cfg=%s creds=%s", cfg, creds)
+	}
+	snaps, _ := filepath.Glob(filepath.Join(h.home, ".agentswap", "claude", "accounts", "*.json"))
+	if len(snaps) != 2 {
+		t.Fatalf("snapshots %v", snaps)
+	}
+	for _, s := range snaps {
+		if b, _ := os.ReadFile(s); !vault.Sealed(b) {
+			t.Fatalf("%s not sealed", s)
+		}
+	}
+	if code, out, _ := h.run("agentswap"); code != 0 || !strings.Contains(out, "Claude Code · #2 <b@x>") {
+		t.Fatalf("overview %d %s", code, out)
+	}
+}
+
+func TestClaudeLoginPointsToOfficialApp(t *testing.T) {
+	h := newHarness(t)
+	h.exec = func([]string, string, ...string) error { t.Fatal("ran a login command"); return nil }
+	code, _, errs := h.run("ccswap", "login")
+	if code == 0 || !strings.Contains(errs, "/login") {
+		t.Fatalf("%d %q", code, errs)
+	}
+	_, out, _ := h.run("ccswap", "help")
+	if strings.Contains(out, "ccswap login") || !strings.Contains(out, "ccswap import") {
+		t.Fatalf("help %s", out)
+	}
+}
+
+func writeCswapFixture(t *testing.T, dir string) {
+	os.MkdirAll(filepath.Join(dir, "credentials"), 0o700)
+	os.MkdirAll(filepath.Join(dir, "configs"), 0o700)
+	os.WriteFile(filepath.Join(dir, "sequence.json"), []byte(`{"sequence":[1,2,3],"accounts":{"1":{"email":"a@x","alias":"home"},"2":{"email":"b@x","alias":"work"},"3":{"email":"k@token.local","kind":"api_key"}}}`), 0o600)
+	for i, u := range []string{"u1", "u2"} {
+		email := []string{"a@x", "b@x"}[i]
+		c := `{"claudeAiOauth":{"accessToken":"old-` + u + `","refreshToken":"rt-` + u + `"}}`
+		os.WriteFile(filepath.Join(dir, "credentials", fmt.Sprintf(".creds-%d-%s.enc", i+1, email)), []byte(base64.StdEncoding.EncodeToString([]byte(c))), 0o600)
+		os.WriteFile(filepath.Join(dir, "configs", fmt.Sprintf(".claude-config-%d-%s.json", i+1, email)), []byte(`{"oauthAccount":{"accountUuid":"`+u+`","organizationUuid":"o","emailAddress":"`+email+`"}}`), 0o600)
+	}
+}
+
+func TestClaudeImportMenuChoosesCswap(t *testing.T) {
+	h := newHarness(t)
+	writeCswapFixture(t, filepath.Join(h.home, ".local", "share", "claude-swap"))
+	h.claudeLogin("u2", "o", "b@x", "fresh")
+	h.stdin = "1\n"
+	code, out, errs := h.run("ccswap", "import")
+	if code != 0 {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	for _, want := range []string{"1) cswap", "Imported home <a@x>", "Imported work <b@x>", "k@token.local", "cswap purge"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in\n%s", want, out)
+		}
+	}
+	creds, _ := os.ReadFile(filepath.Join(h.home, ".claude", ".credentials.json"))
+	if !strings.Contains(string(creds), "fresh") {
+		t.Fatalf("live overwritten by cswap copy: %s", creds)
+	}
+	_, list, _ := h.run("ccswap", "list")
+	if !strings.Contains(list, "home") || !strings.Contains(list, "work") {
+		t.Fatalf("list %s", list)
+	}
+	h.stdin = "1\n"
+	code, out, _ = h.run("ccswap", "import")
+	if code != 0 || strings.Count(out, "skipped") != 2 {
+		t.Fatalf("second import %d %s", code, out)
+	}
+}
+
+func TestClaudeImportMenuCancel(t *testing.T) {
+	h := newHarness(t)
+	h.stdin = "\n"
+	code, out, _ := h.run("ccswap", "import")
+	if code != 0 || !strings.Contains(out, "Cancelled") {
+		t.Fatalf("%d %q", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(h.home, ".agentswap", "claude", "registry.json")); err == nil {
+		t.Fatal("imported on cancel")
+	}
+}
+
+func TestImportOnlyForClaude(t *testing.T) {
+	h := newHarness(t)
+	if code, _, _ := h.run("cxswap", "import"); code != 2 {
+		t.Fatalf("code %d", code)
 	}
 }

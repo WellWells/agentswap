@@ -9,7 +9,7 @@ Switch between multiple accounts of AI coding agents from one small binary. No N
 | Agent | Commands | Status |
 |---|---|---|
 | OpenAI Codex | `cxswap`, `codexswap`, `agentswap codex` | supported |
-| Claude Code | `ccswap`, `claudeswap`, `agentswap claude` | planned |
+| Claude Code | `ccswap`, `claudeswap`, `agentswap claude` | supported |
 | Antigravity | | planned |
 
 ## Install
@@ -50,9 +50,24 @@ cxswap rm 2
 
 Once an account is saved, do not run `codex login` or `codex logout` yourself: both revoke the tokens of the account that is signed in. `cxswap login` signs in from a temporary `CODEX_HOME`, so saved accounts stay valid.
 
-Restart Codex after switching, including `codex app-server daemon restart`. Saved accounts live in `~/.agentswap/` (override with `AGENTSWAP_HOME`); `CODEX_HOME` is respected. Codex's `cli_auth_credentials_store = "keyring"` mode is not supported yet.
+Restart Codex after switching, including `codex app-server daemon restart`. `CODEX_HOME` is respected. Codex's `cli_auth_credentials_store = "keyring"` mode is not supported yet.
 
-These files contain login tokens. Keep them private.
+### Claude Code
+
+```sh
+ccswap add work        # save the account signed in to Claude Code now
+ccswap import          # or bring accounts over from cswap (claude-swap)
+
+ccswap                 # usage of every saved account
+ccswap list
+ccswap 2               # switch; running sessions follow on their next request
+```
+
+Sign in to other accounts with Claude Code itself (`/login`), then run `ccswap add`. `CLAUDE_CONFIG_DIR` is respected, MCP and plugin tokens in `.credentials.json` stay with the machine, and only `oauthAccount` in `.claude.json` is replaced. On macOS the credentials are read from and written to the Keychain. Only Claude subscription logins are supported. After `ccswap import`, stop using cswap and run `cswap purge`: its files are only base64.
+
+### Storage
+
+Saved accounts live in `~/.agentswap/` (override with `AGENTSWAP_HOME`) and are encrypted for the current user on the current machine: DPAPI on Windows, a key in the Keychain on macOS, and a key in the Secret Service on Linux (falling back to a key file bound to `/etc/machine-id`, with a warning). A copy of `~/.agentswap` cannot be decrypted on another computer.
 
 ## Build from source
 

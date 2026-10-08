@@ -1,6 +1,7 @@
 package swap
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -256,5 +257,118 @@ func TestImportOfLiveAccountAlsoRefreshesLive(t *testing.T) {
 	}
 	if string(f.live) != "a|alice@x.com|new" || snapshot(t, m, "a") != "a|alice@x.com|new" {
 		t.Fatalf("live=%q snap=%q", f.live, snapshot(t, m, "a"))
+	}
+}
+
+type lockingProvider struct {
+	*fakeProvider
+	events []string
+}
+
+func (l *lockingProvider) LockLive() (func(), error) {
+	l.events = append(l.events, "lock")
+	return func() { l.events = append(l.events, "unlock") }, nil
+}
+
+func (l *lockingProvider) WriteLive(b []byte) error {
+	l.events = append(l.events, "write")
+	return l.fakeProvider.WriteLive(b)
+}
+
+func (l *lockingProvider) Usage(ctx context.Context, snap []byte, active bool) (Usage, []byte, error) {
+	l.events = append(l.events, "usage")
+	return Usage{}, nil, nil
+}
+
+func TestSwitchHoldsLiveLockUntilWritten(t *testing.T) {
+	m, f := newManager(t)
+	lp := &lockingProvider{fakeProvider: f}
+	m.P = lp
+	addAccount(t, m, f, "k1|a@x|1", "")
+	addAccount(t, m, f, "k2|b@x|1", "")
+	lp.events = nil
+	if _, _, err := m.Switch("1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(lp.events, ","); got != "lock,write,unlock" {
+		t.Fatalf("events %s", got)
+	}
+}
+
+func TestUsageReleasesLiveLockBeforeFn(t *testing.T) {
+	m, f := newManager(t)
+	lp := &lockingProvider{fakeProvider: f}
+	m.P = lp
+	addAccount(t, m, f, "k1|a@x|1", "")
+	lp.events = nil
+	if _, _, err := m.Usage(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(lp.events, ","); got != "lock,unlock,usage" {
+		t.Fatalf("events %s", got)
+	}
+}
+
+func TestAliasErrorsAreTyped(t *testing.T) {
+	m, f := newManager(t)
+	addAccount(t, m, f, "k1|a@x|1", "")
+	addAccount(t, m, f, "k2|b@x|1", "work")
+	if err := m.SetAlias("1", "work"); !errors.Is(err, ErrAlias) || !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("dup: %v", err)
+	}
+	if err := m.SetAlias("1", "12"); !errors.Is(err, ErrAlias) {
+		t.Fatalf("number: %v", err)
+	}
+}
+
+type usageRecorder struct {
+	*fakeProvider
+	active map[string]bool
+}
+
+func (u *usageRecorder) Usage(ctx context.Context, snap []byte, active bool) (Usage, []byte, error) {
+	u.active[string(snap)] = active
+	return Usage{}, nil, nil
+}
+
+func TestUnidentifiableLiveKeepsLastActiveAccountActive(t *testing.T) {
+	m, f := newManager(t)
+	ur := &usageRecorder{fakeProvider: f, active: map[string]bool{}}
+	m.P = ur
+	addAccount(t, m, f, "k1|a@x|1", "")
+	addAccount(t, m, f, "k2|b@x|1", "")
+	f.live = []byte("unparseable")
+	if _, _, err := m.Usage(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if !ur.active["k2|b@x|1"] || ur.active["k1|a@x|1"] {
+		t.Fatalf("active flags %v", ur.active)
+	}
+}
+
+func TestAdoptSavesLiveCopyAndNeverWritesLive(t *testing.T) {
+	m, f := newManager(t)
+	f.live = []byte("k1|a@x|fresh")
+	a, err := m.Adopt([]byte("k1|a@x|stale"), "home")
+	if err != nil || a.Alias != "home" {
+		t.Fatalf("%+v %v", a, err)
+	}
+	if got := snapshot(t, m, "k1"); got != "k1|a@x|fresh" {
+		t.Fatalf("saved %q", got)
+	}
+	if string(f.live) != "k1|a@x|fresh" || f.writes != 0 {
+		t.Fatalf("live touched: %q writes=%d", f.live, f.writes)
+	}
+	if _, err := m.Adopt([]byte("k2|b@x|x"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshot(t, m, "k2"); got != "k2|b@x|x" || f.writes != 0 {
+		t.Fatalf("k2 %q writes=%d", got, f.writes)
+	}
+	if _, err := m.Adopt([]byte("k2|b@x|y"), ""); !errors.Is(err, ErrExists) {
+		t.Fatalf("existing: %v", err)
+	}
+	if got := snapshot(t, m, "k2"); got != "k2|b@x|x" {
+		t.Fatalf("existing overwritten: %q", got)
 	}
 }

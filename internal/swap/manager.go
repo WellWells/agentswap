@@ -13,7 +13,11 @@ import (
 	"github.com/WellWells/agentswap/internal/store"
 )
 
-var ErrNoLive = errors.New("no live credentials found; log in first")
+var (
+	ErrNoLive   = errors.New("no live credentials found; log in first")
+	ErrMismatch = errors.New("live credentials belong to another saved account")
+	ErrExists   = errors.New("account is already saved")
+)
 
 type Manager struct {
 	P           Provider
@@ -43,7 +47,7 @@ func (m *Manager) now() time.Time {
 	return time.Now()
 }
 
-func (m *Manager) withRegistry(fn func(r *store.Registry, l live) error) error {
+func (m *Manager) withRegistry(hold bool, fn func(r *store.Registry, l live) error) error {
 	timeout := m.LockTimeout
 	if timeout == 0 {
 		timeout = 15 * time.Second
@@ -57,7 +61,27 @@ func (m *Manager) withRegistry(fn func(r *store.Registry, l live) error) error {
 	if err != nil {
 		return err
 	}
+	if err := m.S.Migrate(); err != nil {
+		return err
+	}
+	unlock := func() {}
+	if ll, ok := m.P.(LiveLocker); ok {
+		if unlock, err = ll.LockLive(); err != nil {
+			return err
+		}
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			unlock()
+		}
+	}
+	defer release()
 	l, err := m.sync(r)
+	if !hold {
+		release()
+	}
 	if err != nil {
 		return err
 	}
@@ -76,6 +100,17 @@ func (m *Manager) sync(r *store.Registry) (live, error) {
 	l := live{raw: raw, id: id, idErr: idErr}
 	if !l.ok() {
 		return l, nil
+	}
+	if sl, ok := m.P.(SameLogin); ok {
+		for _, a := range r.Accounts {
+			if a.Key == id.Key {
+				continue
+			}
+			if snap, err := m.S.ReadSnapshot(a.Key); err == nil && sl.SameLogin(raw, snap) {
+				l.idErr = fmt.Errorf("%w: %s", ErrMismatch, a.Email)
+				return l, nil
+			}
+		}
 	}
 	i := r.Index(id.Key)
 	if i < 0 {
@@ -103,7 +138,7 @@ func (m *Manager) save(r *store.Registry, l live, alias string) (store.Account, 
 
 func (m *Manager) Add(alias string) (store.Account, error) {
 	var out store.Account
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(true, func(r *store.Registry, l live) error {
 		if l.raw == nil {
 			return ErrNoLive
 		}
@@ -128,7 +163,7 @@ func (m *Manager) Add(alias string) (store.Account, error) {
 
 func (m *Manager) Import(raw []byte, alias string) (store.Account, error) {
 	var out store.Account
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(true, func(r *store.Registry, l live) error {
 		id, err := m.P.Identify(raw)
 		if err != nil {
 			return err
@@ -156,10 +191,42 @@ func (m *Manager) Import(raw []byte, alias string) (store.Account, error) {
 	return out, err
 }
 
+func (m *Manager) Adopt(raw []byte, alias string) (store.Account, error) {
+	var out store.Account
+	err := m.withRegistry(true, func(r *store.Registry, l live) error {
+		id, err := m.P.Identify(raw)
+		if err != nil {
+			return err
+		}
+		if r.Index(id.Key) >= 0 {
+			return ErrExists
+		}
+		if alias != "" {
+			if err := validAlias(r, alias, id.Key); err != nil {
+				return err
+			}
+		}
+		src := live{raw: raw, id: id}
+		if l.ok() && l.id.Key == id.Key {
+			src = l
+		}
+		a, err := m.save(r, src, alias)
+		if err != nil {
+			return err
+		}
+		if l.ok() && l.id.Key == id.Key {
+			r.Active = id.Key
+		}
+		out = a
+		return m.S.Save(r)
+	})
+	return out, err
+}
+
 func (m *Manager) Switch(q string) (store.Account, bool, error) {
 	var out store.Account
 	changed := false
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(true, func(r *store.Registry, l live) error {
 		i, err := r.Find(q)
 		if err != nil {
 			return err
@@ -199,7 +266,7 @@ func (m *Manager) Switch(q string) (store.Account, bool, error) {
 
 func (m *Manager) Status() (Status, error) {
 	var st Status
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(false, func(r *store.Registry, l live) error {
 		st = Status{Registry: r, Live: l.id, LiveOK: l.ok()}
 		return m.S.Save(r)
 	})
@@ -208,7 +275,7 @@ func (m *Manager) Status() (Status, error) {
 
 func (m *Manager) Remove(q string) (store.Account, error) {
 	var out store.Account
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(false, func(r *store.Registry, l live) error {
 		i, err := r.Find(q)
 		if err != nil {
 			return err
@@ -224,7 +291,7 @@ func (m *Manager) Remove(q string) (store.Account, error) {
 }
 
 func (m *Manager) SetAlias(q, alias string) error {
-	return m.withRegistry(func(r *store.Registry, l live) error {
+	return m.withRegistry(false, func(r *store.Registry, l live) error {
 		i, err := r.Find(q)
 		if err != nil {
 			return err
@@ -239,13 +306,20 @@ func (m *Manager) SetAlias(q, alias string) error {
 	})
 }
 
+var ErrAlias = errors.New("invalid alias")
+
+type aliasError string
+
+func (a aliasError) Error() string { return string(a) }
+func (a aliasError) Unwrap() error { return ErrAlias }
+
 func validAlias(r *store.Registry, alias, key string) error {
 	if _, err := strconv.Atoi(alias); err == nil || alias == "-" || strings.ContainsAny(alias, " \t") {
-		return fmt.Errorf("invalid alias %q", alias)
+		return aliasError(fmt.Sprintf("invalid alias %q", alias))
 	}
 	for _, a := range r.Accounts {
 		if a.Key != key && strings.EqualFold(a.Alias, alias) {
-			return fmt.Errorf("alias %q is already used by %s", alias, a.Email)
+			return aliasError(fmt.Sprintf("alias %q is already used by %s", alias, a.Email))
 		}
 	}
 	return nil

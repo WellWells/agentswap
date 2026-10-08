@@ -12,6 +12,7 @@ type Window struct {
 	UsedPercent int
 	Minutes     int
 	ResetsAt    time.Time
+	Label       string
 }
 
 func (w Window) Percent(now time.Time) int {
@@ -46,7 +47,7 @@ type usageJob struct {
 func (m *Manager) Usage(ctx context.Context, all bool) (Status, map[string]UsageResult, error) {
 	var st Status
 	results := map[string]UsageResult{}
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(false, func(r *store.Registry, l live) error {
 		st = Status{Registry: r, Live: l.id, LiveOK: l.ok()}
 		reader, ok := m.P.(UsageReader)
 		if !ok {
@@ -64,7 +65,11 @@ func (m *Manager) Usage(ctx context.Context, all bool) (Status, map[string]Usage
 					results[a.Key] = UsageResult{Err: err}
 					continue
 				}
-				jobs = append(jobs, usageJob{a.Key, snap, l.ok() && a.Key == l.id.Key})
+				active := a.Key == l.id.Key && l.ok()
+				if l.raw != nil && !l.ok() && a.Key == r.Active {
+					active = true
+				}
+				jobs = append(jobs, usageJob{a.Key, snap, active})
 			}
 			if l.ok() && r.Index(l.id.Key) < 0 {
 				jobs = append(jobs, usageJob{l.id.Key, l.raw, true})

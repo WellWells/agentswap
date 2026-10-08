@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,16 +11,20 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/WellWells/agentswap/internal/claude"
 	"github.com/WellWells/agentswap/internal/codex"
+	"github.com/WellWells/agentswap/internal/execx"
 	"github.com/WellWells/agentswap/internal/fsx"
 	"github.com/WellWells/agentswap/internal/links"
 	"github.com/WellWells/agentswap/internal/store"
 	"github.com/WellWells/agentswap/internal/swap"
 	"github.com/WellWells/agentswap/internal/ui"
+	"github.com/WellWells/agentswap/internal/vault"
 )
 
 type Env struct {
@@ -37,6 +42,24 @@ type Env struct {
 	Zone    string
 	Exec    func(env []string, name string, args ...string) error
 	Output  func(env []string, name string, args ...string) ([]byte, error)
+	Stdin   io.Reader
+	GOOS    string
+	Run     execx.Runner
+	Vault   vault.Vault
+}
+
+func (e Env) goos() string {
+	if e.GOOS != "" {
+		return e.GOOS
+	}
+	return runtime.GOOS
+}
+
+func (e Env) vault() vault.Vault {
+	if e.Vault != nil {
+		return e.Vault
+	}
+	return vault.Default(e.dir("AGENTSWAP_HOME", ".agentswap"), e.Stderr)
 }
 
 const usageTimeout = 10 * time.Second
@@ -66,20 +89,27 @@ type provider struct {
 	homeCopy  []string
 	daemon    []string
 	hint      string
+	usage     string
+	empty     string
+	addMore   string
 	open      func(Env) swap.Provider
 }
 
 var providerOrder = []string{"codex", "claude"}
 
 var providers = map[string]provider{
-	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", loginCmd: []string{"codex", "login"}, homeEnv: "CODEX_HOME", homeDir: ".codex", homeCopy: []string{"config.toml"}, daemon: []string{"codex", "app-server", "daemon"}, hint: "hintCodex", open: func(e Env) swap.Provider {
+	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", loginCmd: []string{"codex", "login"}, homeEnv: "CODEX_HOME", homeDir: ".codex", homeCopy: []string{"config.toml"}, daemon: []string{"codex", "app-server", "daemon"}, hint: "hintCodex", usage: "usage", empty: "emptyProvider", addMore: "listAddMore", open: func(e Env) swap.Provider {
 		return codex.Provider{
 			Home:       e.dir("CODEX_HOME", ".codex"),
 			RefreshURL: e.Getenv("CODEX_REFRESH_TOKEN_URL_OVERRIDE"),
 			UserAgent:  "agentswap/" + e.Version,
 		}
 	}},
-	"claude": {name: "claude", display: "Claude Code"},
+	"claude": {name: "claude", display: "Claude Code", supported: true, login: "claude auth login", hint: "hintClaude", usage: "usageClaude", empty: "emptyClaude", addMore: "listAddMoreClaude", open: func(e Env) swap.Provider {
+		p := claude.New(e.Getenv, e.Home, e.goos(), e.Run)
+		p.UserAgent = "agentswap/" + e.Version
+		return p
+	}},
 }
 
 var commands = []struct{ name, provider string }{
@@ -111,7 +141,7 @@ func commandNames() []string {
 }
 
 func (e Env) manager(p provider) *swap.Manager {
-	return &swap.Manager{P: p.open(e), S: store.Store{Dir: filepath.Join(e.dir("AGENTSWAP_HOME", ".agentswap"), p.name)}}
+	return &swap.Manager{P: p.open(e), S: store.Store{Dir: filepath.Join(e.dir("AGENTSWAP_HOME", ".agentswap"), p.name), Vault: e.vault()}}
 }
 
 func isNumber(s string) bool {
@@ -183,7 +213,7 @@ func (e Env) report(prog string, p provider, err error) int {
 	l := e.Lang
 	var ue usageError
 	if errors.As(err, &ue) {
-		fmt.Fprintf(e.Stderr, "%s: %v\n\n%s", prog, err, e.usage(prog))
+		fmt.Fprintf(e.Stderr, "%s: %v\n\n%s", prog, err, e.usageFor(p, prog))
 		return 2
 	}
 	msg := err.Error()
@@ -203,6 +233,18 @@ func (e Env) report(prog string, p provider, err error) int {
 		msg = l.T("locked")
 	case errors.Is(err, codex.ErrKeyringStore):
 		msg = l.T("keyring")
+	case errors.Is(err, swap.ErrMismatch):
+		msg = l.T("mismatch")
+	case errors.Is(err, claude.ErrBusy):
+		msg = l.T("claudeBusy")
+	case errors.Is(err, claude.ErrUnsupportedLogin):
+		msg = l.T("claudeUnsupported")
+	case errors.Is(err, claude.ErrWiped):
+		msg = l.T("claudeWiped")
+	case errors.Is(err, vault.ErrKey):
+		msg = l.T("vaultKey")
+	case errors.Is(err, vault.ErrCorrupt):
+		msg = l.T("vaultCorrupt")
 	}
 	fmt.Fprintf(e.Stderr, "%s: %s\n", prog, msg)
 	return 1
@@ -243,11 +285,23 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		fmt.Fprintln(e.Stdout, l.T("saved", label(a)))
 		return nil
 	case cmd == "login":
+		if len(p.loginCmd) == 0 {
+			return errors.New(l.T("loginOfficial", prog))
+		}
 		alias := ""
 		if len(args) > 0 {
 			alias = args[0]
 		}
 		return login(e, prog, p, m, alias)
+	case cmd == "import":
+		if p.name != "claude" {
+			return usageError(l.T("unknownCommand", cmd))
+		}
+		choice := ""
+		if len(args) > 0 {
+			choice = args[0]
+		}
+		return importMenu(e, m, choice)
 	case cmd == "switch" || cmd == "use":
 		if err := need(1); err != nil {
 			return err
@@ -276,7 +330,7 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		printVersion(e)
 		return nil
 	case isHelp(cmd):
-		fmt.Fprint(e.Stdout, e.usage(prog))
+		fmt.Fprint(e.Stdout, e.usageFor(p, prog))
 		return nil
 	case strings.HasPrefix(cmd, "--"):
 		return usageError(l.T("unknownFlag", cmd))
@@ -421,8 +475,9 @@ func (e Env) cards(prog string, p provider, m *swap.Manager, all bool) ([]ui.Car
 
 func fill(c *ui.Card, res swap.UsageResult) {
 	c.State, c.Detail = ui.Classify(res.Err, map[error]ui.State{
-		codex.ErrLoginExpired: ui.LoginExpired,
-		codex.ErrNoUsage:      ui.NoUsage,
+		codex.ErrLoginExpired:  ui.LoginExpired,
+		codex.ErrNoUsage:       ui.NoUsage,
+		claude.ErrLoginExpired: ui.LoginExpired,
 	})
 	if c.State == ui.Unavailable {
 		c.Detail = shortError(res.Err)
@@ -457,7 +512,7 @@ func usageView(e Env, prog string, p provider, m *swap.Manager) error {
 		return err
 	}
 	if len(cards) == 0 {
-		fmt.Fprintln(e.Stdout, e.Lang.T("emptyProvider", p.name, p.login, prog))
+		fmt.Fprintln(e.Stdout, e.Lang.T(p.empty, p.name, p.login, prog))
 		return nil
 	}
 	ui.MarkSuggestions(cards, e.now(), switchCmd(prog))
@@ -476,7 +531,7 @@ func list(e Env, prog string, p provider, m *swap.Manager) error {
 	}
 	r := st.Registry
 	if len(r.Accounts) == 0 {
-		fmt.Fprintln(e.Stdout, e.Lang.T("emptyProvider", p.name, p.login, prog))
+		fmt.Fprintln(e.Stdout, e.Lang.T(p.empty, p.name, p.login, prog))
 		return nil
 	}
 	var cards []ui.Card
@@ -490,7 +545,7 @@ func list(e Env, prog string, p provider, m *swap.Manager) error {
 	fmt.Fprintln(e.Stdout)
 	fmt.Fprintln(e.Stdout, e.Lang.T("listHelp", prog))
 	if len(r.Accounts) == 1 {
-		fmt.Fprintln(e.Stdout, e.Lang.T("listAddMore", prog, p.login))
+		fmt.Fprintln(e.Stdout, e.Lang.T(p.addMore, prog, p.login))
 	}
 	return nil
 }
@@ -577,4 +632,88 @@ func label(a store.Account) string {
 
 func (e Env) usage(prog string) string {
 	return e.Lang.T("usage", prog)
+}
+
+func (e Env) usageFor(p provider, prog string) string {
+	if p.usage == "" {
+		return e.usage(prog)
+	}
+	return e.Lang.T(p.usage, prog)
+}
+
+func importMenu(e Env, m *swap.Manager, choice string) error {
+	l := e.Lang
+	dirs := claude.CswapDirs(e.Home, e.goos(), e.Getenv)
+	found := ""
+	for _, d := range dirs {
+		if _, err := os.Stat(filepath.Join(d, "sequence.json")); err == nil {
+			found = d
+			break
+		}
+	}
+	if choice == "" {
+		where := l.T("importNotFound")
+		if found != "" {
+			where = found
+		}
+		fmt.Fprintln(e.Stdout, l.T("importMenu", where))
+		if e.Stdin != nil {
+			line, _ := bufio.NewReader(e.Stdin).ReadString('\n')
+			choice = strings.TrimSpace(line)
+		}
+	}
+	if choice != "1" {
+		fmt.Fprintln(e.Stdout, l.T("importCancelled"))
+		return nil
+	}
+	if found == "" {
+		return errors.New(l.T("cswapMissing", strings.Join(dirs, ", ")))
+	}
+	return importCswap(e, m, found)
+}
+
+func importCswap(e Env, m *swap.Manager, dir string) error {
+	l := e.Lang
+	var keychain func(int, string) ([]byte, error)
+	if e.goos() == "darwin" {
+		keychain = claude.CswapKeychain(e.Run)
+	}
+	accts, err := claude.ReadCswap(dir, keychain)
+	if err != nil {
+		return err
+	}
+	for _, a := range accts {
+		name := a.Email
+		if a.Alias != "" {
+			name = a.Alias + " <" + a.Email + ">"
+		}
+		if a.Err != nil {
+			fmt.Fprintln(e.Stdout, l.T("importFailed", name, importReason(l, a.Err)))
+			continue
+		}
+		acc, err := m.Adopt(a.Snapshot, a.Alias)
+		if err != nil && a.Alias != "" && errors.Is(err, swap.ErrAlias) {
+			fmt.Fprintln(e.Stdout, l.T("importAliasDropped", a.Alias, a.Email))
+			acc, err = m.Adopt(a.Snapshot, "")
+		}
+		if errors.Is(err, swap.ErrExists) {
+			fmt.Fprintln(e.Stdout, l.T("importSkipped", name))
+			continue
+		}
+		if err != nil {
+			fmt.Fprintln(e.Stdout, l.T("importFailed", name, importReason(l, err)))
+			continue
+		}
+		fmt.Fprintln(e.Stdout, l.T("imported", label(acc)))
+	}
+	fmt.Fprintln(e.Stdout)
+	fmt.Fprintln(e.Stdout, l.T("cswapAfter", dir))
+	return nil
+}
+
+func importReason(l ui.Lang, err error) string {
+	if errors.Is(err, claude.ErrUnsupportedLogin) {
+		return l.T("claudeUnsupportedShort")
+	}
+	return shortError(err)
 }

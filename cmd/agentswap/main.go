@@ -50,6 +50,7 @@ func main() {
 		Zone:    ui.DetectZone(os.Getenv),
 		Exec:    run,
 		Output:  output,
+		Stdin:   os.Stdin,
 	}))
 }
 

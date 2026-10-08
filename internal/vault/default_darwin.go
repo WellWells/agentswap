@@ -8,4 +8,4 @@ import (
 	"github.com/WellWells/agentswap/internal/execx"
 )
 
-func Default(dir string, warn io.Writer) Vault { return newDarwin(execx.Run) }
+func Default(dir string, warn io.Writer) Vault { return newDarwin(dir, execx.Run) }

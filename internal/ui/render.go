@@ -178,7 +178,7 @@ func Render(w io.Writer, cards []Card, o Options) {
 				fmt.Fprintln(w)
 			}
 			pct := win.Percent(o.Now)
-			fmt.Fprintln(w, p.bold(o.Lang.WindowName(win.Minutes)))
+			fmt.Fprintln(w, p.bold(o.Lang.WindowTitle(win.Minutes, win.Label)))
 			fmt.Fprintln(w, Bar(pct, barWidth, o.Color)+"  "+o.Lang.T("used", pct))
 			if !win.ResetsAt.IsZero() && win.ResetsAt.After(o.Now) {
 				fmt.Fprintln(w, p.color(colorDim, ResetLine(o.Lang, win.ResetsAt, o.Now, o.Zone)))
@@ -222,6 +222,9 @@ func headroom(c Card, now time.Time) (int, bool) {
 	}
 	worst := 0
 	for _, w := range c.Usage.Windows {
+		if w.Label != "" {
+			continue
+		}
 		if p := w.Percent(now); p > worst {
 			worst = p
 		}
