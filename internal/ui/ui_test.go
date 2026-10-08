@@ -181,18 +181,17 @@ func TestResetLine(t *testing.T) {
 	cases := []struct {
 		lang Lang
 		t    time.Time
-		zone string
 		want string
 	}{
-		{En, at(10, 8, 15, 20), "", "Resets 3:20pm (UTC+8)"},
-		{En, at(10, 8, 15, 0), "", "Resets 3pm (UTC+8)"},
-		{En, at(10, 14, 17, 41), "Asia/Taipei", "Resets Oct 14, 5:41pm (Asia/Taipei)"},
-		{ZhTW, at(10, 8, 15, 20), "", "今天 15:20 重置（UTC+8）"},
-		{ZhCN, at(10, 14, 17, 41), "", "10/14（三）17:41 重置（UTC+8）"},
-		{ZhTW, at(10, 14, 17, 41), "", "10/14（三）17:41 重置（UTC+8）"},
+		{En, at(10, 8, 15, 20), "Resets 3:20pm"},
+		{En, at(10, 8, 15, 0), "Resets 3pm"},
+		{En, at(10, 14, 17, 41), "Resets Oct 14, 5:41pm"},
+		{ZhTW, at(10, 8, 15, 20), "今天 15:20 重置"},
+		{ZhCN, at(10, 14, 17, 41), "10/14（三）17:41 重置"},
+		{ZhTW, at(10, 14, 17, 41), "10/14（三）17:41 重置"},
 	}
 	for _, c := range cases {
-		if got := ResetLine(c.lang, c.t, now, c.zone); got != c.want {
+		if got := ResetLine(c.lang, c.t, now); got != c.want {
 			t.Errorf("got %q want %q", got, c.want)
 		}
 	}
@@ -253,25 +252,73 @@ func TestRenderPlainCards(t *testing.T) {
 	Render(&buf, cards, Options{Lang: En, Width: 80, Now: now})
 	out := buf.String()
 	for _, want := range []string{
-		"Codex · #1 main <jora@x.com> · prolite  ● active\n\nWeekly limit\n",
-		"76% used\nResets Oct 14, 5:41pm (UTC+8)\n",
-		"Codex · #2 work <boss@x.com> · plus  ★ suggested: cxswap 2\n\n5-hour limit\n",
-		"42% used\nResets 1:20pm (UTC+8)\n\nWeekly limit\n",
-		"Codex · #3 <old@x.com>\n\nLogin expired",
+		"Codex ────",
+		"#1 main <jora@x.com> · prolite" + strings.Repeat(" ", 22) + "● active\n\nWeekly limit" + strings.Repeat(" ", 27) + "Resets Oct 14, 5:41pm\n",
+		"░   76% used\n" + strings.Repeat("─", 60) + "\n",
+		"#2 work <boss@x.com> · plus            ★ suggested: cxswap 2\n\n5-hour limit",
+		"Resets 1:20pm\n",
+		"42% used\n\nWeekly limit",
+		"#3 <old@x.com>\n\nLogin expired",
 		"From local session log · 3h ago",
 		"No usage data for API key logins",
 		"Usage unavailable (HTTP 500)",
+		strings.Repeat("─", 60) + "\nReset times are in UTC+8\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "\x1b[") {
-		t.Error("escape codes without color")
+	if strings.Contains(out, "\x1b[") || strings.Contains(out, "│") {
+		t.Errorf("escape codes or columns in plain narrow output:\n%s", out)
 	}
-	bar := strings.Split(strings.Split(out, "Weekly limit\n")[1], "  ")[0]
-	if n := len([]rune(bar)); n != 50 {
-		t.Errorf("bar width %d: %q", n, bar)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "% used") && displayWidth(line) != 60 {
+			t.Errorf("bar line width %d: %q", displayWidth(line), line)
+		}
+	}
+}
+
+func TestRenderSideBySide(t *testing.T) {
+	now := at(10, 8, 10, 0)
+	var buf bytes.Buffer
+	Render(&buf, sampleCards(now), Options{Lang: ZhTW, Width: 120, Now: now})
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if !strings.HasPrefix(lines[0], "Codex ─") || !strings.Contains(lines[0], "─┬─") {
+		t.Fatalf("title rule: %q", lines[0])
+	}
+	if n := strings.Count(buf.String(), "─┼─"); n != 2 {
+		t.Errorf("want 2 row dividers, got %d:\n%s", n, buf.String())
+	}
+	if !strings.Contains(lines[1], "#1 main <jora@x.com>") || !strings.Contains(lines[1], "│ #2 work <boss@x.com>") {
+		t.Errorf("first row not side by side: %q", lines[1])
+	}
+	for _, line := range lines[:len(lines)-1] {
+		if displayWidth(line) > 120 {
+			t.Errorf("line wider than terminal: %q", line)
+		}
+		i := strings.IndexAny(line, "│┬┼┴")
+		if i < 0 || displayWidth(line[:i]) != 59 {
+			t.Errorf("column divider misplaced: %q", line)
+		}
+	}
+	if lines[len(lines)-1] != "重置時間為 UTC+8" {
+		t.Errorf("footer: %q", lines[len(lines)-1])
+	}
+}
+
+func TestGrid(t *testing.T) {
+	cases := []struct{ n, total, cols, width int }{
+		{2, 120, 2, 58},
+		{2, 80, 1, 60},
+		{1, 200, 1, 60},
+		{6, 200, 4, 47},
+		{3, 30, 1, 30},
+		{3, 10, 1, 24},
+	}
+	for _, c := range cases {
+		if cols, width := grid(c.n, c.total); cols != c.cols || width != c.width {
+			t.Errorf("grid(%d, %d) = %d, %d want %d, %d", c.n, c.total, cols, width, c.cols, c.width)
+		}
 	}
 }
 
@@ -280,7 +327,7 @@ func TestRenderChineseAndColor(t *testing.T) {
 	var buf bytes.Buffer
 	Render(&buf, sampleCards(now)[:1], Options{Lang: ZhTW, Width: 40, Color: true, Now: now})
 	out := buf.String()
-	for _, want := range []string{"● 使用中", "本週額度", "已用 76%", "10/14（三）17:41 重置（UTC+8）", "\x1b[1m"} {
+	for _, want := range []string{"● 使用中", "本週額度", "已用 76%", "10/14（三）17:41 重置", "重置時間為 UTC+8", "\x1b[1m"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -290,7 +337,7 @@ func TestRenderChineseAndColor(t *testing.T) {
 func TestRenderUnsavedCard(t *testing.T) {
 	var buf bytes.Buffer
 	Render(&buf, []Card{{Provider: "Codex", Email: "new@x.com", Active: true, Unsaved: "cxswap add"}}, Options{Lang: En, Width: 80, Now: time.Now()})
-	if !strings.Contains(buf.String(), "Codex · <new@x.com>  ● active  not saved, run `cxswap add`") {
+	if !strings.Contains(buf.String(), "Codex ───") || !strings.Contains(buf.String(), "<new@x.com>            ● active  not saved, run `cxswap add`") {
 		t.Fatalf("got %q", buf.String())
 	}
 }
