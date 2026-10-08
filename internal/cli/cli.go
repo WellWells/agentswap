@@ -233,6 +233,8 @@ func (e Env) report(prog string, p provider, err error) int {
 		msg = l.T("locked")
 	case errors.Is(err, codex.ErrKeyringStore):
 		msg = l.T("keyring")
+	case errors.Is(err, swap.ErrMismatch):
+		msg = l.T("mismatch")
 	case errors.Is(err, claude.ErrBusy):
 		msg = l.T("claudeBusy")
 	case errors.Is(err, claude.ErrUnsupportedLogin):

@@ -13,7 +13,10 @@ import (
 	"github.com/WellWells/agentswap/internal/store"
 )
 
-var ErrNoLive = errors.New("no live credentials found; log in first")
+var (
+	ErrNoLive   = errors.New("no live credentials found; log in first")
+	ErrMismatch = errors.New("live credentials belong to another saved account")
+)
 
 type Manager struct {
 	P           Provider
@@ -96,6 +99,17 @@ func (m *Manager) sync(r *store.Registry) (live, error) {
 	l := live{raw: raw, id: id, idErr: idErr}
 	if !l.ok() {
 		return l, nil
+	}
+	if sl, ok := m.P.(SameLogin); ok {
+		for _, a := range r.Accounts {
+			if a.Key == id.Key {
+				continue
+			}
+			if snap, err := m.S.ReadSnapshot(a.Key); err == nil && sl.SameLogin(raw, snap) {
+				l.idErr = fmt.Errorf("%w: %s", ErrMismatch, a.Email)
+				return l, nil
+			}
+		}
 	}
 	i := r.Index(id.Key)
 	if i < 0 {

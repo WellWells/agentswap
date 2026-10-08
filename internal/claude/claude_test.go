@@ -144,3 +144,34 @@ func TestWipedLiveDoesNotOverwriteSnapshot(t *testing.T) {
 		t.Fatalf("snapshot overwritten: %s", snap)
 	}
 }
+
+func TestWriteLiveRestoresCredentialsWhenConfigWriteFails(t *testing.T) {
+	p, _ := setup(t)
+	writeLive(t, p, creds("at1", "rt1"), `{"oauthAccount":`+oauth("u1", "o1", "a@x")+`}`)
+	os.Remove(p.GlobalConfig)
+	os.MkdirAll(p.GlobalConfig, 0o700)
+	if err := p.WriteLive(Pack([]byte(creds("at2", "rt2")), []byte(oauth("u2", "o2", "b@x")))); err == nil {
+		t.Fatal("expected error")
+	}
+	got, _ := os.ReadFile(filepath.Join(p.ConfigDir, ".credentials.json"))
+	if !strings.Contains(string(got), "rt1") || strings.Contains(string(got), "rt2") {
+		t.Fatalf("credentials not restored: %s", got)
+	}
+}
+
+func TestSyncDoesNotSaveAnotherAccountsTokens(t *testing.T) {
+	p, home := setup(t)
+	m := &swap.Manager{P: p, S: store.Store{Dir: filepath.Join(home, "data")}, LockTimeout: time.Second}
+	writeLive(t, p, creds("atA", "rtA"), `{"oauthAccount":`+oauth("uA", "o", "a@x")+`}`)
+	m.Add("")
+	writeLive(t, p, creds("atB", "rtB"), `{"oauthAccount":`+oauth("uB", "o", "b@x")+`}`)
+	m.Add("")
+	writeLive(t, p, creds("atB", "rtB"), `{"oauthAccount":`+oauth("uA", "o", "a@x")+`}`)
+	if _, err := m.Status(); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := m.S.ReadSnapshot("claude:uA:o")
+	if !strings.Contains(string(snap), "rtA") {
+		t.Fatalf("account A snapshot overwritten with B's tokens: %s", snap)
+	}
+}

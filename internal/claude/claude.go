@@ -203,6 +203,15 @@ func Identify(b []byte) (swap.Identity, error) {
 
 func (p Provider) Identify(b []byte) (swap.Identity, error) { return Identify(b) }
 
+func (p Provider) SameLogin(a, b []byte) bool {
+	x, errA := aiOf(a)
+	y, errB := aiOf(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return (x.RefreshToken != "" && x.RefreshToken == y.RefreshToken) || (x.AccessToken != "" && x.AccessToken == y.AccessToken)
+}
+
 func (p Provider) ReadLive() ([]byte, error) {
 	creds, err := p.readCreds()
 	if err != nil {
@@ -256,6 +265,16 @@ func (p Provider) WriteLive(b []byte) error {
 	if err := p.writeCreds(encodeObject(append(keep, acct...), pretty)); err != nil {
 		return err
 	}
+	if err := p.writeConfig(e.OAuthAccount); err != nil {
+		if live != nil {
+			p.writeCreds(live)
+		}
+		return err
+	}
+	return nil
+}
+
+func (p Provider) writeConfig(oauthAccount []byte) error {
 	perm := os.FileMode(0o600)
 	global, err := os.ReadFile(p.GlobalConfig)
 	switch {
@@ -268,7 +287,7 @@ func (p Provider) WriteLive(b []byte) error {
 			perm = st.Mode().Perm()
 		}
 	}
-	out, err := setTop(global, "oauthAccount", e.OAuthAccount)
+	out, err := setTop(global, "oauthAccount", oauthAccount)
 	if err != nil {
 		return fmt.Errorf("%s: %w", p.GlobalConfig, err)
 	}

@@ -7,6 +7,10 @@ type Identity struct {
 	Mode  string
 }
 
+type SameLogin interface {
+	SameLogin(a, b []byte) bool
+}
+
 type LiveLocker interface {
 	LockLive() (func(), error)
 }
