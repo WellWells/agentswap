@@ -32,12 +32,12 @@ jobs:
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           mkdir -p brew
           go run ./tools/dist -version "$VERSION" -brew brew/agentswap.rb
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist/
           retention-days: 14
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: formula
           path: brew/agentswap.rb
