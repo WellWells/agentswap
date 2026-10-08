@@ -65,7 +65,11 @@ func (m *Manager) Usage(ctx context.Context, all bool) (Status, map[string]Usage
 					results[a.Key] = UsageResult{Err: err}
 					continue
 				}
-				jobs = append(jobs, usageJob{a.Key, snap, l.ok() && a.Key == l.id.Key})
+				active := a.Key == l.id.Key && l.ok()
+				if l.raw != nil && !l.ok() && a.Key == r.Active {
+					active = true
+				}
+				jobs = append(jobs, usageJob{a.Key, snap, active})
 			}
 			if l.ok() && r.Index(l.id.Key) < 0 {
 				jobs = append(jobs, usageJob{l.id.Key, l.raw, true})

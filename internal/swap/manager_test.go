@@ -320,3 +320,28 @@ func TestAliasErrorsAreTyped(t *testing.T) {
 		t.Fatalf("number: %v", err)
 	}
 }
+
+type usageRecorder struct {
+	*fakeProvider
+	active map[string]bool
+}
+
+func (u *usageRecorder) Usage(ctx context.Context, snap []byte, active bool) (Usage, []byte, error) {
+	u.active[string(snap)] = active
+	return Usage{}, nil, nil
+}
+
+func TestUnidentifiableLiveKeepsLastActiveAccountActive(t *testing.T) {
+	m, f := newManager(t)
+	ur := &usageRecorder{fakeProvider: f, active: map[string]bool{}}
+	m.P = ur
+	addAccount(t, m, f, "k1|a@x|1", "")
+	addAccount(t, m, f, "k2|b@x|1", "")
+	f.live = []byte("unparseable")
+	if _, _, err := m.Usage(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if !ur.active["k2|b@x|1"] || ur.active["k1|a@x|1"] {
+		t.Fatalf("active flags %v", ur.active)
+	}
+}
