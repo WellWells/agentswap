@@ -30,10 +30,10 @@ func TestParseTargets(t *testing.T) {
 	}
 }
 
-func TestTarGzHasBinaryAliasesAndExtras(t *testing.T) {
+func TestTarGzHasBinaryAndExtras(t *testing.T) {
 	var buf bytes.Buffer
 	extras := []file{{"LICENSE", []byte("MIT")}}
-	if err := writeTarGz(&buf, []byte("BIN"), extras, []string{"cxswap", "ccswap"}, mtime); err != nil {
+	if err := writeTarGz(&buf, []byte("BIN"), extras, mtime); err != nil {
 		t.Fatal(err)
 	}
 	zr, err := gzip.NewReader(&buf)
@@ -41,7 +41,7 @@ func TestTarGzHasBinaryAliasesAndExtras(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr := tar.NewReader(zr)
-	seen := map[string]*tar.Header{}
+	var names []string
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
@@ -50,7 +50,7 @@ func TestTarGzHasBinaryAliasesAndExtras(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		seen[h.Name] = h
+		names = append(names, h.Name)
 		if h.Name == "agentswap" {
 			b, _ := io.ReadAll(tr)
 			if string(b) != "BIN" || h.Mode != 0o755 {
@@ -58,14 +58,8 @@ func TestTarGzHasBinaryAliasesAndExtras(t *testing.T) {
 			}
 		}
 	}
-	for _, alias := range []string{"cxswap", "ccswap"} {
-		h := seen[alias]
-		if h == nil || h.Typeflag != tar.TypeLink || h.Linkname != "agentswap" {
-			t.Fatalf("alias %s: %+v", alias, h)
-		}
-	}
-	if seen["LICENSE"] == nil {
-		t.Fatal("LICENSE missing")
+	if strings.Join(names, ",") != "agentswap,LICENSE" {
+		t.Fatalf("entries %v", names)
 	}
 }
 

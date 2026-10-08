@@ -28,7 +28,9 @@ irm https://github.com/WellWells/agentswap/releases/latest/download/install.ps1 
 
 Or download an archive from [Releases](https://github.com/WellWells/agentswap/releases) and verify it against `checksums.txt`.
 
-With Go: `go install github.com/WellWells/agentswap/cmd/agentswap@latest`, then run it as `agentswap codex ...`.
+With Go: `go install github.com/WellWells/agentswap/cmd/agentswap@latest`, then run `agentswap link` to create `cxswap` and the other commands next to it.
+
+The installers only ship `agentswap` and run `agentswap link`, which adds the per-agent commands as symlinks (hard links on Windows). `agentswap unlink` removes them.
 
 ## Usage
 

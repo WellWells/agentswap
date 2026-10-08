@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/WellWells/agentswap/internal/cli"
@@ -16,6 +17,13 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "agentswap:", err)
 		os.Exit(1)
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		exe = ""
 	}
 	color, width := ui.Terminal(os.Stdout)
 	if os.Getenv("NO_COLOR") != "" {
@@ -33,6 +41,7 @@ func main() {
 		Stderr:  os.Stderr,
 		Getenv:  os.Getenv,
 		Home:    home,
+		Exe:     exe,
 		Version: version,
 		Lang:    ui.DetectLang(os.Getenv, ui.SystemLocale()),
 		Color:   color,

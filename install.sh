@@ -41,11 +41,9 @@ fi
 tar -xzf "$tmp/$asset" -C "$tmp"
 mkdir -p "$dir"
 install -m 0755 "$tmp/agentswap" "$dir/agentswap"
-for name in cxswap codexswap ccswap claudeswap; do
-  ln -f "$dir/agentswap" "$dir/$name"
-done
+"$dir/agentswap" link
 
-echo "Installed agentswap, cxswap, codexswap, ccswap, claudeswap to $dir"
+echo "Installed agentswap to $dir"
 case ":$PATH:" in
   *":$dir:"*) ;;
   *) echo "Add $dir to your PATH" ;;

@@ -21,8 +21,6 @@ import (
 
 const allTargets = "linux/amd64,linux/arm64,darwin/amd64,darwin/arm64,windows/amd64,windows/arm64"
 
-var aliases = []string{"cxswap", "codexswap", "ccswap", "claudeswap"}
-
 type target struct{ OS, Arch string }
 
 func (t target) archive() string {
@@ -50,7 +48,7 @@ func parseTargets(s string) ([]target, error) {
 	return out, nil
 }
 
-func writeTarGz(w io.Writer, bin []byte, extras []file, links []string, mtime time.Time) error {
+func writeTarGz(w io.Writer, bin []byte, extras []file, mtime time.Time) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 	if err := tw.WriteHeader(&tar.Header{Name: "agentswap", Mode: 0o755, Size: int64(len(bin)), ModTime: mtime, Typeflag: tar.TypeReg}); err != nil {
@@ -58,11 +56,6 @@ func writeTarGz(w io.Writer, bin []byte, extras []file, links []string, mtime ti
 	}
 	if _, err := tw.Write(bin); err != nil {
 		return err
-	}
-	for _, l := range links {
-		if err := tw.WriteHeader(&tar.Header{Name: l, Linkname: "agentswap", Mode: 0o755, ModTime: mtime, Typeflag: tar.TypeLink}); err != nil {
-			return err
-		}
 	}
 	for _, f := range extras {
 		if err := tw.WriteHeader(&tar.Header{Name: f.Name, Mode: 0o644, Size: int64(len(f.Data)), ModTime: mtime, Typeflag: tar.TypeReg}); err != nil {
@@ -182,7 +175,7 @@ func run() error {
 		if t.OS == "windows" {
 			err = writeZip(f, binName, bin, extras, mtime)
 		} else {
-			err = writeTarGz(f, bin, extras, aliases, mtime)
+			err = writeTarGz(f, bin, extras, mtime)
 		}
 		if cerr := f.Close(); err == nil {
 			err = cerr

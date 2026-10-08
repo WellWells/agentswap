@@ -21,11 +21,8 @@ try {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     $exe = Join-Path $dir 'agentswap.exe'
     Copy-Item (Join-Path $tmp 'agentswap.exe') $exe -Force
-    foreach ($name in 'cxswap', 'codexswap', 'ccswap', 'claudeswap') {
-        $link = Join-Path $dir "$name.exe"
-        if (Test-Path $link) { Remove-Item $link -Force }
-        New-Item -ItemType HardLink -Path $link -Target $exe | Out-Null
-    }
+    & $exe link
+    if ($LASTEXITCODE -ne 0) { throw 'agentswap link failed' }
 } finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -35,4 +32,4 @@ if (-not (($userPath -split ';') -contains $dir)) {
     [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ";$dir").TrimStart(';'), 'User')
     Write-Host "Added $dir to your user PATH (open a new terminal)."
 }
-Write-Host "Installed agentswap, cxswap, codexswap, ccswap, claudeswap to $dir"
+Write-Host "Installed agentswap to $dir"
