@@ -200,6 +200,14 @@ func windowMinutes(window json.RawMessage, bucketID string) int {
 	return 0
 }
 
+func groupLabel(name string) string {
+	name = strings.TrimSpace(name)
+	if len(name) > len(" models") && strings.EqualFold(name[len(name)-len(" models"):], " models") {
+		return name[:len(name)-len(" models")]
+	}
+	return name
+}
+
 func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, error) {
 	var lr struct {
 		Project     json.RawMessage `json:"cloudaicompanionProject"`
@@ -241,7 +249,7 @@ func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, er
 			used := int(math.Round((1 - *b.RemainingFraction) * 100))
 			w := swap.Window{UsedPercent: min(max(used, 0), 100), Minutes: windowMinutes(b.Window, b.BucketID)}
 			if !strings.HasPrefix(strings.ToLower(b.BucketID), "gemini") {
-				w.Label = g.DisplayName
+				w.Label = groupLabel(g.DisplayName)
 				if w.Label == "" {
 					w.Label = b.DisplayName
 				}

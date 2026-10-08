@@ -20,7 +20,7 @@ const quotaBody = `{"groups":[
  {"displayName":"Gemini","buckets":[
   {"bucketId":"gemini-5h","window":"18000s","remainingFraction":0.75,"resetTime":"2026-10-08T12:00:00Z","displayName":"5 hours"},
   {"bucketId":"gemini-weekly","remainingFraction":0.1,"resetTime":"2026-10-12T00:00:00Z"}]},
- {"displayName":"Claude and GPT","buckets":[
+ {"displayName":"Claude and GPT models","buckets":[
   {"bucketId":"3p-5h","remainingFraction":1,"resetTime":"2026-10-08T13:00:00Z"},
   {"bucketId":"3p-weekly","resetTime":"2026-10-12T00:00:00Z"},
   {"bucketId":"3p-daily","remainingFraction":0.5,"disabled":true}]}]}`
