@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/WellWells/agentswap/internal/jsonx"
 	"github.com/WellWells/agentswap/internal/swap"
 )
 
@@ -258,7 +259,7 @@ func (p Provider) applyTokens(snap []byte, access, refresh string, expiresIn flo
 	if err != nil {
 		return nil, err
 	}
-	ai, ok, err := getTop(e.Credentials, "claudeAiOauth")
+	ai, ok, err := jsonx.Get(e.Credentials, "claudeAiOauth")
 	if err != nil || !ok {
 		return nil, ErrUnsupportedLogin
 	}
@@ -267,7 +268,7 @@ func (p Provider) applyTokens(snap []byte, access, refresh string, expiresIn flo
 			return
 		}
 		b, _ := json.Marshal(v)
-		ai, err = setTop(ai, k, b)
+		ai, err = jsonx.Set(ai, k, b)
 	}
 	set("accessToken", access)
 	if refresh != "" {
@@ -282,7 +283,7 @@ func (p Provider) applyTokens(snap []byte, access, refresh string, expiresIn flo
 	if err != nil {
 		return nil, err
 	}
-	creds, err := setTop(e.Credentials, "claudeAiOauth", ai)
+	creds, err := jsonx.Set(e.Credentials, "claudeAiOauth", ai)
 	if err != nil {
 		return nil, err
 	}
