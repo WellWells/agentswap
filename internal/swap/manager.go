@@ -16,6 +16,7 @@ import (
 var (
 	ErrNoLive   = errors.New("no live credentials found; log in first")
 	ErrMismatch = errors.New("live credentials belong to another saved account")
+	ErrExists   = errors.New("account is already saved")
 )
 
 type Manager struct {
@@ -183,6 +184,38 @@ func (m *Manager) Import(raw []byte, alias string) (store.Account, error) {
 		a, err := m.save(r, live{raw: raw, id: id}, alias)
 		if err != nil {
 			return err
+		}
+		out = a
+		return m.S.Save(r)
+	})
+	return out, err
+}
+
+func (m *Manager) Adopt(raw []byte, alias string) (store.Account, error) {
+	var out store.Account
+	err := m.withRegistry(true, func(r *store.Registry, l live) error {
+		id, err := m.P.Identify(raw)
+		if err != nil {
+			return err
+		}
+		if r.Index(id.Key) >= 0 {
+			return ErrExists
+		}
+		if alias != "" {
+			if err := validAlias(r, alias, id.Key); err != nil {
+				return err
+			}
+		}
+		src := live{raw: raw, id: id}
+		if l.ok() && l.id.Key == id.Key {
+			src = l
+		}
+		a, err := m.save(r, src, alias)
+		if err != nil {
+			return err
+		}
+		if l.ok() && l.id.Key == id.Key {
+			r.Active = id.Key
 		}
 		out = a
 		return m.S.Save(r)

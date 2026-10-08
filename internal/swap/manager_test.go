@@ -345,3 +345,30 @@ func TestUnidentifiableLiveKeepsLastActiveAccountActive(t *testing.T) {
 		t.Fatalf("active flags %v", ur.active)
 	}
 }
+
+func TestAdoptSavesLiveCopyAndNeverWritesLive(t *testing.T) {
+	m, f := newManager(t)
+	f.live = []byte("k1|a@x|fresh")
+	a, err := m.Adopt([]byte("k1|a@x|stale"), "home")
+	if err != nil || a.Alias != "home" {
+		t.Fatalf("%+v %v", a, err)
+	}
+	if got := snapshot(t, m, "k1"); got != "k1|a@x|fresh" {
+		t.Fatalf("saved %q", got)
+	}
+	if string(f.live) != "k1|a@x|fresh" || f.writes != 0 {
+		t.Fatalf("live touched: %q writes=%d", f.live, f.writes)
+	}
+	if _, err := m.Adopt([]byte("k2|b@x|x"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshot(t, m, "k2"); got != "k2|b@x|x" || f.writes != 0 {
+		t.Fatalf("k2 %q writes=%d", got, f.writes)
+	}
+	if _, err := m.Adopt([]byte("k2|b@x|y"), ""); !errors.Is(err, ErrExists) {
+		t.Fatalf("existing: %v", err)
+	}
+	if got := snapshot(t, m, "k2"); got != "k2|b@x|x" {
+		t.Fatalf("existing overwritten: %q", got)
+	}
+}

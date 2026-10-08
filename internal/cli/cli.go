@@ -691,29 +691,14 @@ func importCswap(e Env, m *swap.Manager, dir string) error {
 			fmt.Fprintln(e.Stdout, l.T("importFailed", name, importReason(l, a.Err)))
 			continue
 		}
-		id, err := claude.Identify(a.Snapshot)
-		if err != nil {
-			fmt.Fprintln(e.Stdout, l.T("importFailed", name, importReason(l, err)))
-			continue
-		}
-		st, err := m.Status()
-		if err != nil {
-			return err
-		}
-		if st.Registry.Index(id.Key) >= 0 {
-			fmt.Fprintln(e.Stdout, l.T("importSkipped", name))
-			continue
-		}
-		save := func(alias string) (store.Account, error) {
-			if st.LiveOK && st.Live.Key == id.Key {
-				return m.Add(alias)
-			}
-			return m.Import(a.Snapshot, alias)
-		}
-		acc, err := save(a.Alias)
+		acc, err := m.Adopt(a.Snapshot, a.Alias)
 		if err != nil && a.Alias != "" && errors.Is(err, swap.ErrAlias) {
 			fmt.Fprintln(e.Stdout, l.T("importAliasDropped", a.Alias, a.Email))
-			acc, err = save("")
+			acc, err = m.Adopt(a.Snapshot, "")
+		}
+		if errors.Is(err, swap.ErrExists) {
+			fmt.Fprintln(e.Stdout, l.T("importSkipped", name))
+			continue
 		}
 		if err != nil {
 			fmt.Fprintln(e.Stdout, l.T("importFailed", name, importReason(l, err)))
