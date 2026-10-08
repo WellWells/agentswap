@@ -772,3 +772,38 @@ func TestStatusShowsOneAccount(t *testing.T) {
 		t.Fatalf("missing %d %q", code, errs)
 	}
 }
+
+func TestHelpIsSpecificToEachCommand(t *testing.T) {
+	h := newHarness(t)
+	cases := []struct {
+		args       []string
+		want, deny []string
+	}{
+		{[]string{"cxswap", "help"}, []string{"cxswap status [account]", "cxswap login [alias]", "cxswap <account>", "<account> is the number shown by `cxswap list`"}, []string{"import"}},
+		{[]string{"ccswap", "--help"}, []string{"ccswap status [account]", "ccswap import", "/login", "<account> is the number shown by `ccswap list`"}, []string{"ccswap login"}},
+		{[]string{"agentswap", "help"}, []string{"agentswap claude <command>", "agentswap codex <command>", "agentswap link", "ccswap help"}, []string{"login [alias]"}},
+	}
+	for _, c := range cases {
+		code, out, _ := h.run(c.args...)
+		if code != 0 {
+			t.Fatalf("%v: code %d", c.args, code)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%v: missing %q in\n%s", c.args, w, out)
+			}
+		}
+		for _, d := range c.deny {
+			if strings.Contains(out, d) {
+				t.Errorf("%v: should not contain %q", c.args, d)
+			}
+		}
+	}
+	h.lang = ui.ZhTW
+	_, out, _ := h.run("ccswap", "help")
+	for _, w := range []string{"ccswap status [帳號]", "ccswap import", "<帳號>"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("zh: missing %q in\n%s", w, out)
+		}
+	}
+}

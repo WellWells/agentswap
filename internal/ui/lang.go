@@ -114,72 +114,9 @@ var messages = map[string][2]string{
 	"unlinked":               {"Removed %s from %s", "已從 %[2]s 移除 %[1]s"},
 	"nothingLinked":          {"No command links to remove.", "沒有可移除的指令連結。"},
 	"keyring":                {"Codex stores credentials in the OS keyring (cli_auth_credentials_store); only \"file\" is supported", "Codex 設定為把憑證存在系統鑰匙圈（cli_auth_credentials_store），目前只支援 \"file\" 模式"},
-	"usage": {`Usage:
-  %[1]s                    show usage for all saved accounts
-  %[1]s list               list account numbers and switch commands
-  %[1]s <n|alias|email>    switch account (n is the number shown by list)
-  %[1]s switch <q>         same as above, spelled out
-  %[1]s add [alias]        save the currently logged-in account
-  %[1]s login [alias]      sign in to another account and save it
-  %[1]s -                  switch to the previous account
-  %[1]s status             same as above: status and usage of every account
-  %[1]s alias <q> [name]   set or clear an alias
-  %[1]s rm <q>             forget a saved account
-  %[1]s version
-
-Commands: agentswap (all agents), agentswap <codex|claude> ..., cxswap/codexswap, ccswap/claudeswap
-Setup: agentswap link creates those commands next to agentswap; agentswap unlink removes them
-Language: set AGENTSWAP_LANG=en or zh-TW
-`, `用法：
-  %[1]s                      顯示所有已儲存帳號的用量
-  %[1]s list                 列出帳號編號與切換指令
-  %[1]s <編號|別名|email>    切換帳號（編號就是 list 顯示的編號）
-  %[1]s switch <查詢>        同上，完整寫法
-  %[1]s add [別名]           儲存目前登入的帳號
-  %[1]s login [別名]         登入其他帳號並儲存（不影響目前帳號）
-  %[1]s -                    切回上一個帳號
-  %[1]s status               同上：所有帳號的狀態與用量
-  %[1]s alias <查詢> [名稱]  設定或清除別名
-  %[1]s rm <查詢>            移除已儲存的帳號
-  %[1]s version
-
-指令：agentswap（所有 agent）、agentswap <codex|claude> ...、cxswap/codexswap、ccswap/claudeswap
-設定：agentswap link 會在 agentswap 旁建立上述指令，agentswap unlink 則移除
-語言：可設定 AGENTSWAP_LANG=en 或 zh-TW
-`},
-	"usageClaude": {`Usage:
-  %[1]s                    show usage for all saved accounts
-  %[1]s list               list account numbers and switch commands
-  %[1]s <n|alias|email>    switch account (n is the number shown by list)
-  %[1]s switch <q>         same as above, spelled out
-  %[1]s add [alias]        save the currently logged-in account
-  %[1]s -                  switch to the previous account
-  %[1]s status             same as above: status and usage of every account
-  %[1]s alias <q> [name]   set or clear an alias
-  %[1]s rm <q>             forget a saved account
-  %[1]s import             import accounts from cswap (asks where from)
-  %[1]s version
-
-Commands: agentswap (all agents), agentswap <codex|claude> ..., cxswap/codexswap, ccswap/claudeswap
-Setup: agentswap link creates those commands next to agentswap; agentswap unlink removes them
-Language: set AGENTSWAP_LANG=en or zh-TW
-`, `用法：
-  %[1]s                      顯示所有已儲存帳號的用量
-  %[1]s list                 列出帳號編號與切換指令
-  %[1]s <編號|別名|email>    切換帳號（編號就是 list 顯示的編號）
-  %[1]s switch <查詢>        同上，完整寫法
-  %[1]s add [別名]           儲存目前登入的帳號
-  %[1]s -                    切回上一個帳號
-  %[1]s status               同上：所有帳號的狀態與用量
-  %[1]s alias <查詢> [名稱]  設定或清除別名
-  %[1]s rm <查詢>            移除已儲存的帳號
-  %[1]s import               從 cswap 匯入帳號（會先詢問來源）
-  %[1]s version
-
-指令：agentswap（所有 agent）、agentswap <codex|claude> ...、cxswap/codexswap、ccswap/claudeswap
-設定：agentswap link 會在 agentswap 旁建立上述指令，agentswap unlink 則移除
-語言：可設定 AGENTSWAP_LANG=en 或 zh-TW
-`},
+	"usageAgentswap":         {"Usage: agentswap [command]\n\n  agentswap                   show usage of every saved account of every agent\n  agentswap codex <command>   same as `cxswap <command>`\n  agentswap claude <command>  same as `ccswap <command>`\n  agentswap link              create cxswap, codexswap, ccswap and claudeswap next to agentswap\n  agentswap unlink            remove those commands\n  agentswap version           show the version\n\nRun `cxswap help` or `ccswap help` for the commands of each agent.\nLanguage: set AGENTSWAP_LANG=en or zh-TW\n", "用法：agentswap [指令]\n\n  agentswap                   顯示所有 agent 已存帳號的用量\n  agentswap codex <指令>      等同 `cxswap <指令>`\n  agentswap claude <指令>     等同 `ccswap <指令>`\n  agentswap link              在 agentswap 旁建立 cxswap、codexswap、ccswap、claudeswap\n  agentswap unlink            移除上述指令\n  agentswap version           顯示版本\n\n各 agent 的指令請執行 `cxswap help` 或 `ccswap help`。\n語言：可設定 AGENTSWAP_LANG=en 或 zh-TW\n"},
+	"usage":                  {"Usage: %[1]s [command]\n\n  %[1]s                         show usage of every saved account\n  %[1]s status [account]        same; give an account to show only that one\n  %[1]s list                    show account numbers, aliases and switch commands\n  %[1]s <account>               switch to an account\n  %[1]s switch <account>        same as above, spelled out\n  %[1]s -                       switch back to the previous account\n  %[1]s add [alias]             save the account that is signed in now\n  %[1]s login [alias]           sign in to another account and save it; the current one stays signed in\n  %[1]s alias <account> [name]  set an alias; leave out the name to clear it\n  %[1]s rm <account>            forget a saved account (it stays signed in)\n  %[1]s version                 show the version\n\n<account> is the number shown by `%[1]s list`, an alias or an email; a unique part of an alias or email also works.\nAfter switching, restart open Codex CLI sessions, the IDE extension and the desktop app; the app-server daemon is restarted for you.\n\nOther commands: agentswap (all agents), agentswap <codex|claude> ..., cxswap/codexswap, ccswap/claudeswap\nSetup: `agentswap link` creates those commands next to agentswap; `agentswap unlink` removes them\nLanguage: set AGENTSWAP_LANG=en or zh-TW\n", "用法：%[1]s [指令]\n\n  %[1]s                         顯示所有已存帳號的用量\n  %[1]s status [帳號]           同上；指定帳號時只顯示該帳號\n  %[1]s list                    列出帳號編號、別名與切換指令\n  %[1]s <帳號>                  切換到指定帳號\n  %[1]s switch <帳號>           同上，完整寫法\n  %[1]s -                       切回上一個帳號\n  %[1]s add [別名]              儲存目前登入的帳號\n  %[1]s login [別名]            登入其他帳號並儲存，目前的帳號維持登入\n  %[1]s alias <帳號> [別名]     設定別名；省略別名則清除\n  %[1]s rm <帳號>               移除已存帳號（不會登出該帳號）\n  %[1]s version                 顯示版本\n\n<帳號> 可以是 `%[1]s list` 顯示的編號、別名或 email；別名或 email 只要能唯一辨識，打一部分也可以。\n切換後請重新啟動已開啟的 Codex CLI、IDE 擴充功能與桌面版；app-server daemon 會自動重新啟動。\n\n其他指令：agentswap（所有 agent）、agentswap <codex|claude> ...、cxswap/codexswap、ccswap/claudeswap\n設定：`agentswap link` 會在 agentswap 旁建立上述指令，`agentswap unlink` 則移除\n語言：可設定 AGENTSWAP_LANG=en 或 zh-TW\n"},
+	"usageClaude":            {"Usage: %[1]s [command]\n\n  %[1]s                         show usage of every saved account\n  %[1]s status [account]        same; give an account to show only that one\n  %[1]s list                    show account numbers, aliases and switch commands\n  %[1]s <account>               switch to an account\n  %[1]s switch <account>        same as above, spelled out\n  %[1]s -                       switch back to the previous account\n  %[1]s add [alias]             save the account that is signed in now\n  %[1]s alias <account> [name]  set an alias; leave out the name to clear it\n  %[1]s rm <account>            forget a saved account (it stays signed in)\n  %[1]s import                  import accounts from cswap (asks where to import from)\n  %[1]s version                 show the version\n\n<account> is the number shown by `%[1]s list`, an alias or an email; a unique part of an alias or email also works.\nTo add another account, sign in to it with Claude Code (`/login`), then run `%[1]s add`.\nRunning Claude Code sessions follow a switch on their next request.\n\nOther commands: agentswap (all agents), agentswap <codex|claude> ..., cxswap/codexswap, ccswap/claudeswap\nSetup: `agentswap link` creates those commands next to agentswap; `agentswap unlink` removes them\nLanguage: set AGENTSWAP_LANG=en or zh-TW\n", "用法：%[1]s [指令]\n\n  %[1]s                         顯示所有已存帳號的用量\n  %[1]s status [帳號]           同上；指定帳號時只顯示該帳號\n  %[1]s list                    列出帳號編號、別名與切換指令\n  %[1]s <帳號>                  切換到指定帳號\n  %[1]s switch <帳號>           同上，完整寫法\n  %[1]s -                       切回上一個帳號\n  %[1]s add [別名]              儲存目前登入的帳號\n  %[1]s alias <帳號> [別名]     設定別名；省略別名則清除\n  %[1]s rm <帳號>               移除已存帳號（不會登出該帳號）\n  %[1]s import                  從 cswap 匯入帳號（會先詢問來源）\n  %[1]s version                 顯示版本\n\n<帳號> 可以是 `%[1]s list` 顯示的編號、別名或 email；別名或 email 只要能唯一辨識，打一部分也可以。\n要加入其他帳號：先用 Claude Code 登入（`/login`），再執行 `%[1]s add`。\n切換後，執行中的 Claude Code 會在下一次請求時改用新帳號。\n\n其他指令：agentswap（所有 agent）、agentswap <codex|claude> ...、cxswap/codexswap、ccswap/claudeswap\n設定：`agentswap link` 會在 agentswap 旁建立上述指令，`agentswap unlink` 則移除\n語言：可設定 AGENTSWAP_LANG=en 或 zh-TW\n"},
 }
 
 func (l Lang) T(key string, args ...any) string {

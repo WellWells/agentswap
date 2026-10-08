@@ -650,7 +650,7 @@ func label(a store.Account) string {
 }
 
 func (e Env) usage(prog string) string {
-	return e.Lang.T("usage", prog)
+	return e.Lang.T("usageAgentswap")
 }
 
 func (e Env) usageFor(p provider, prog string) string {
