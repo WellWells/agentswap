@@ -23,6 +23,7 @@ import (
 	"github.com/WellWells/agentswap/internal/fsx"
 	"github.com/WellWells/agentswap/internal/links"
 	"github.com/WellWells/agentswap/internal/official"
+	"github.com/WellWells/agentswap/internal/procs"
 	"github.com/WellWells/agentswap/internal/store"
 	"github.com/WellWells/agentswap/internal/swap"
 	"github.com/WellWells/agentswap/internal/ui"
@@ -49,8 +50,24 @@ type Env struct {
 	Run     execx.Runner
 	Vault   vault.Vault
 	Clients *official.Detector
+	Procs   Processes
 
+	Interactive bool
+
+	yes      bool
 	autoLang ui.Lang
+}
+
+type Processes interface {
+	Find(names, skipPaths []string) ([]procs.Proc, error)
+	Stop([]procs.Proc) error
+}
+
+func (e Env) processes() Processes {
+	if e.Procs != nil {
+		return e.Procs
+	}
+	return procs.System{Run: e.Run}
 }
 
 func (e Env) clients() *official.Detector {
@@ -105,25 +122,28 @@ type provider struct {
 	usage     string
 	empty     string
 	addMore   string
+	procNames []string
+	procSkip  []string
+	mustStop  bool
 	open      func(Env) swap.Provider
 }
 
 var providerOrder = []string{"codex", "claude", "antigravity"}
 
 var providers = map[string]provider{
-	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", loginCmd: []string{"codex", "login"}, homeEnv: "CODEX_HOME", homeDir: ".codex", homeCopy: []string{"config.toml"}, daemon: []string{"codex", "app-server", "daemon"}, hint: "hintCodex", usage: "usage", empty: "emptyProvider", addMore: "listAddMore", open: func(e Env) swap.Provider {
+	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", loginCmd: []string{"codex", "login"}, homeEnv: "CODEX_HOME", homeDir: ".codex", homeCopy: []string{"config.toml"}, daemon: []string{"codex", "app-server", "daemon"}, hint: "hintCodex", usage: "usage", empty: "emptyProvider", addMore: "listAddMore", procNames: []string{"codex"}, open: func(e Env) swap.Provider {
 		return codex.Provider{
 			Home:       e.dir("CODEX_HOME", ".codex"),
 			RefreshURL: e.Getenv("CODEX_REFRESH_TOKEN_URL_OVERRIDE"),
 			UserAgent:  e.clients().Codex,
 		}
 	}},
-	"claude": {name: "claude", display: "Claude Code", supported: true, login: "claude auth login", official: "loginOfficial", hint: "hintClaude", usage: "usageClaude", empty: "emptyClaude", addMore: "listAddMoreClaude", open: func(e Env) swap.Provider {
+	"claude": {name: "claude", display: "Claude Code", supported: true, login: "claude auth login", official: "loginOfficial", hint: "hintClaude", usage: "usageClaude", empty: "emptyClaude", addMore: "listAddMoreClaude", procNames: []string{"claude"}, procSkip: []string{"AnthropicClaude", "Claude.app/Contents/MacOS/Claude"}, open: func(e Env) swap.Provider {
 		p := claude.New(e.Getenv, e.Home, e.goos(), e.Run)
 		p.UserAgent = e.clients().Claude
 		return p
 	}},
-	"antigravity": {name: "antigravity", display: "Antigravity", supported: true, login: "agy", official: "loginAgy", hint: "hintAntigravity", usage: "usageAntigravity", empty: "emptyAntigravity", addMore: "listAddMoreAntigravity", open: func(e Env) swap.Provider {
+	"antigravity": {name: "antigravity", display: "Antigravity", supported: true, login: "agy", official: "loginAgy", hint: "hintAntigravity", usage: "usageAntigravity", empty: "emptyAntigravity", addMore: "listAddMoreAntigravity", procNames: []string{"agy"}, mustStop: true, open: func(e Env) swap.Provider {
 		p := antigravity.New(e.Getenv, e.goos(), e.Run)
 		p.UserAgent = e.clients().Agy
 		return p
@@ -175,7 +195,14 @@ func isVersion(s string) bool { return s == "version" || s == "--version" || s =
 func Run(e Env) int {
 	prog := strings.ToLower(filepath.Base(strings.ReplaceAll(e.Args[0], `\`, "/")))
 	prog = strings.TrimSuffix(prog, ".exe")
-	args := e.Args[1:]
+	var args []string
+	for _, a := range e.Args[1:] {
+		if a == "-y" || a == "--yes" {
+			e.yes = true
+			continue
+		}
+		args = append(args, a)
+	}
 	e = e.applySavedLang()
 	if e.Clients == nil {
 		e.Clients = e.clients()
@@ -342,7 +369,7 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		if err := need(1); err != nil {
 			return err
 		}
-		return doSwitch(e, p, m, args[0])
+		return doSwitch(e, prog, p, m, args[0])
 	case cmd == "remove" || cmd == "rm":
 		if err := need(1); err != nil {
 			return err
@@ -368,7 +395,7 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 	case strings.HasPrefix(cmd, "--"):
 		return usageError(l.T("unknownFlag", cmd))
 	default:
-		return doSwitch(e, p, m, cmd)
+		return doSwitch(e, prog, p, m, cmd)
 	}
 }
 
@@ -432,7 +459,57 @@ func login(e Env, prog string, p provider, m *swap.Manager, alias string) error 
 	return nil
 }
 
-func doSwitch(e Env, p provider, m *swap.Manager, q string) error {
+func stopRunning(e Env, prog string, p provider, m *swap.Manager, q string) error {
+	if len(p.procNames) == 0 {
+		return nil
+	}
+	st, err := m.Status()
+	if err != nil {
+		return nil
+	}
+	i, err := st.Registry.Find(q)
+	if err != nil || (st.LiveOK && st.Registry.Accounts[i].Key == st.Live.Key) {
+		return nil
+	}
+	found, err := e.processes().Find(p.procNames, p.procSkip)
+	if err != nil || len(found) == 0 {
+		return nil
+	}
+	l := e.Lang
+	name := p.procNames[0]
+	fmt.Fprintln(e.Stdout, l.T("procsFound", name))
+	for _, f := range found {
+		where := f.Path
+		if where == "" {
+			where = f.Name
+		}
+		fmt.Fprintf(e.Stdout, "  PID %-7d %s\n", f.PID, where)
+	}
+	yes := e.yes
+	if !yes && e.Interactive && e.Stdin != nil {
+		fmt.Fprint(e.Stdout, l.T("procsAsk"))
+		line, _ := bufio.NewReader(e.Stdin).ReadString('\n')
+		answer := strings.ToLower(strings.TrimSpace(line))
+		yes = answer == "y" || answer == "yes"
+	}
+	if !yes {
+		if p.mustStop {
+			return errors.New(l.T("procsCancelled", name, prog, q))
+		}
+		fmt.Fprintln(e.Stdout, l.T("procsKept"))
+		return nil
+	}
+	if err := e.processes().Stop(found); err != nil {
+		return err
+	}
+	fmt.Fprintln(e.Stdout, l.T("procsStopped", len(found)))
+	return nil
+}
+
+func doSwitch(e Env, prog string, p provider, m *swap.Manager, q string) error {
+	if err := stopRunning(e, prog, p, m, q); err != nil {
+		return err
+	}
 	a, changed, err := m.Switch(q)
 	if err != nil {
 		return withQuery(q, err)
