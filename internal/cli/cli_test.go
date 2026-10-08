@@ -780,7 +780,7 @@ func TestHelpIsSpecificToEachCommand(t *testing.T) {
 		want, deny []string
 	}{
 		{[]string{"cxswap", "help"}, []string{"cxswap status [account]", "cxswap login [alias]", "cxswap <account>", "<account> is the number shown by `cxswap list`"}, []string{"import"}},
-		{[]string{"ccswap", "--help"}, []string{"ccswap status [account]", "ccswap import", "/login", "<account> is the number shown by `ccswap list`"}, []string{"ccswap login"}},
+		{[]string{"ccswap", "--help"}, []string{"ccswap status [account]", "ccswap import", "/login", "<account> is the number shown by `ccswap list`"}, []string{"ccswap login", "from cswap", "asks where"}},
 		{[]string{"agentswap", "help"}, []string{"agentswap claude <command>", "agentswap codex <command>", "agentswap link", "ccswap help"}, []string{"login [alias]"}},
 	}
 	for _, c := range cases {
@@ -801,6 +801,9 @@ func TestHelpIsSpecificToEachCommand(t *testing.T) {
 	}
 	h.lang = ui.ZhTW
 	_, out, _ := h.run("ccswap", "help")
+	if strings.Contains(out, "從 cswap") || strings.Contains(out, "詢問來源") {
+		t.Errorf("zh help names a third-party tool or is verbose:\n%s", out)
+	}
 	for _, w := range []string{"ccswap status [帳號]", "ccswap import", "<帳號>"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("zh: missing %q in\n%s", w, out)

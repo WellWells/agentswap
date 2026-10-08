@@ -56,7 +56,7 @@ Restart Codex after switching, including `codex app-server daemon restart`. `COD
 
 ```sh
 ccswap add work        # save the account signed in to Claude Code now
-ccswap import          # or bring accounts over from cswap (claude-swap)
+ccswap import          # or import accounts from another tool
 
 ccswap                 # usage of every saved account
 ccswap status work     # usage of one account
