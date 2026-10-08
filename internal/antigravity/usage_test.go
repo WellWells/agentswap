@@ -120,7 +120,7 @@ func TestUsageParsesQuota(t *testing.T) {
 	if len(a.projects) != 1 || a.projects[0] != "proj-1" {
 		t.Fatalf("projects %v", a.projects)
 	}
-	if a.agents[0] != "agentswap/test" {
+	if a.agents[0] != "agentswap/test (antigravity)" {
 		t.Fatalf("agent %q", a.agents[0])
 	}
 }
@@ -217,6 +217,7 @@ func TestWindowMinutes(t *testing.T) {
 		{`"18000s"`, "x", 300},
 		{`"604800s"`, "x", 7 * 24 * 60},
 		{`"5h"`, "x", 300},
+		{`"weekly"`, "x", 7 * 24 * 60},
 		{`18000`, "x", 300},
 		{``, "gemini-5h", 300},
 		{``, "3p-weekly", 7 * 24 * 60},

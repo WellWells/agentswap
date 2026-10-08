@@ -133,7 +133,7 @@ func (p Provider) call(ctx context.Context, access, method string, body, out any
 	req.Header.Set("Authorization", "Bearer "+access)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", p.UserAgent)
+	req.Header.Set("User-Agent", strings.TrimSpace(p.UserAgent+" (antigravity)"))
 	resp, err := p.client().Do(req)
 	if err != nil {
 		return err
