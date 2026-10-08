@@ -74,10 +74,17 @@ Sign in to other accounts with Claude Code itself (`/login`), then run `ccswap a
 agswap add work        # save the account signed in to agy now
 agswap status          # usage of every saved account
 agswap list
-agswap 2               # switch; close every agy first
+agswap 2               # switch; offers to close running agy first
+agswap 2 --yes         # switch and close running agy without asking
 ```
 
-Sign in to other accounts in agy itself, then run `agswap add`. The login lives in the OS keyring (`gemini:antigravity`: Credential Manager on Windows, Keychain on macOS, Secret Service via `secret-tool` on Linux). agy reads it only when it starts and may write its own account back while running, so `agswap` refuses to switch while any `agy` process is running, including `agy remote-control`. The desktop app is not supported yet.
+To add another account, run `/logout` in agy and sign in to it, then run `agswap add`; logging out does not revoke saved accounts. The login lives in the OS keyring (`gemini:antigravity`: Credential Manager on Windows, Keychain on macOS, Secret Service via `secret-tool` on Linux). agy reads it only when it starts and writes its own account back while running, so `agswap` only switches once every `agy` process is closed, including `agy remote-control`. The desktop app is not supported yet.
+
+### Switching while agents run
+
+When switching would change the account, `cxswap`, `ccswap` and `agswap` list the matching processes that are running (`codex`, `claude` or `agy`, never the one you run them from, and not the Claude desktop app) and ask whether to close them. `--yes` (`-y`) closes them without asking; without a terminal nothing is closed. Declining keeps Codex and Claude Code running on the old account until they restart; for agy the switch is cancelled.
+
+Usage and token requests identify themselves the way the official CLI does: the installed `codex`, `claude` and `agy` versions are detected once and cached in `~/.agentswap/clients.json`, with built-in versions as the fallback.
 
 ### Language
 
