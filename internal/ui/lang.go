@@ -72,6 +72,10 @@ var messages = map[string][2]string{
 	"noPrevious":      {"no previous account to switch back to", "沒有上一個帳號可以切回"},
 	"noLive":          {"no live credentials found; log in first (run `%s`)", "找不到目前的登入資料，請先執行 `%s` 登入"},
 	"locked":          {"another agentswap process is busy; try again", "另一個 agentswap 正在執行，請稍後再試"},
+	"noExe":           {"cannot locate the agentswap executable", "找不到 agentswap 執行檔的位置"},
+	"linked":          {"Linked %s in %s", "已在 %[2]s 建立 %[1]s"},
+	"unlinked":        {"Removed %s from %s", "已從 %[2]s 移除 %[1]s"},
+	"nothingLinked":   {"No command links to remove.", "沒有可移除的指令連結。"},
 	"keyring":         {"Codex stores credentials in the OS keyring (cli_auth_credentials_store); only \"file\" is supported", "Codex 設定為把憑證存在系統鑰匙圈（cli_auth_credentials_store），目前只支援 \"file\" 模式"},
 	"usage": {`Usage:
   %[1]s                    show all saved accounts with usage
@@ -84,6 +88,7 @@ var messages = map[string][2]string{
   %[1]s version
 
 Commands: agentswap (all agents), agentswap <codex|claude> ..., cxswap/codexswap, ccswap/claudeswap
+Setup: agentswap link creates those commands next to agentswap; agentswap unlink removes them
 Language: set AGENTSWAP_LANG=en or zh-TW
 `, `用法：
   %[1]s                      列出所有已儲存帳號與用量
@@ -96,6 +101,7 @@ Language: set AGENTSWAP_LANG=en or zh-TW
   %[1]s version
 
 指令：agentswap（所有 agent）、agentswap <codex|claude> ...、cxswap/codexswap、ccswap/claudeswap
+設定：agentswap link 會在 agentswap 旁建立上述指令，agentswap unlink 則移除
 語言：可設定 AGENTSWAP_LANG=en 或 zh-TW
 `},
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/WellWells/agentswap/internal/codex"
 	"github.com/WellWells/agentswap/internal/fsx"
+	"github.com/WellWells/agentswap/internal/links"
 	"github.com/WellWells/agentswap/internal/store"
 	"github.com/WellWells/agentswap/internal/swap"
 	"github.com/WellWells/agentswap/internal/ui"
@@ -23,6 +24,7 @@ type Env struct {
 	Stderr  io.Writer
 	Getenv  func(string) string
 	Home    string
+	Exe     string
 	Version string
 	Now     func() time.Time
 	Lang    ui.Lang
@@ -69,9 +71,32 @@ var providers = map[string]provider{
 	"claude": {name: "claude", display: "Claude Code"},
 }
 
+var commands = []struct{ name, provider string }{
+	{"cxswap", "codex"}, {"codexswap", "codex"},
+	{"ccswap", "claude"}, {"claudeswap", "claude"},
+}
+
 var aliases = map[string]string{
-	"cxswap": "codex", "codexswap": "codex", "codex": "codex", "cx": "codex",
-	"ccswap": "claude", "claudeswap": "claude", "claude": "claude", "cc": "claude",
+	"codex": "codex", "cx": "codex",
+	"claude": "claude", "cc": "claude",
+}
+
+func lookup(s string) (string, bool) {
+	for _, c := range commands {
+		if c.name == s {
+			return c.provider, true
+		}
+	}
+	name, ok := aliases[s]
+	return name, ok
+}
+
+func commandNames() []string {
+	names := make([]string, len(commands))
+	for i, c := range commands {
+		names[i] = c.name
+	}
+	return names
 }
 
 func (e Env) manager(p provider) *swap.Manager {
@@ -85,7 +110,7 @@ func Run(e Env) int {
 	prog := strings.ToLower(filepath.Base(strings.ReplaceAll(e.Args[0], `\`, "/")))
 	prog = strings.TrimSuffix(prog, ".exe")
 	args := e.Args[1:]
-	name, ok := aliases[prog]
+	name, ok := lookup(prog)
 	if !ok {
 		switch {
 		case len(args) == 0:
@@ -96,8 +121,12 @@ func Run(e Env) int {
 		case isVersion(args[0]):
 			printVersion(e)
 			return 0
+		case args[0] == "link":
+			return e.report("agentswap", provider{}, link(e))
+		case args[0] == "unlink":
+			return e.report("agentswap", provider{}, unlink(e))
 		}
-		if name, ok = aliases[strings.ToLower(args[0])]; !ok {
+		if name, ok = lookup(strings.ToLower(args[0])); !ok {
 			fmt.Fprintln(e.Stderr, e.Lang.T("unknownProvider", args[0]))
 			return 2
 		}
@@ -352,6 +381,40 @@ func overview(e Env) error {
 	}
 	ui.Render(e.Stdout, all, e.options())
 	return nil
+}
+
+func (e Env) exe() (string, error) {
+	if e.Exe == "" {
+		return "", errors.New(e.Lang.T("noExe"))
+	}
+	return e.Exe, nil
+}
+
+func link(e Env) error {
+	exe, err := e.exe()
+	if err != nil {
+		return err
+	}
+	names := commandNames()
+	if err := links.Link(exe, names); err != nil {
+		return err
+	}
+	fmt.Fprintln(e.Stdout, e.Lang.T("linked", strings.Join(names, ", "), filepath.Dir(exe)))
+	return nil
+}
+
+func unlink(e Env) error {
+	exe, err := e.exe()
+	if err != nil {
+		return err
+	}
+	removed, err := links.Unlink(exe, commandNames())
+	if len(removed) > 0 {
+		fmt.Fprintln(e.Stdout, e.Lang.T("unlinked", strings.Join(removed, ", "), filepath.Dir(exe)))
+	} else if err == nil {
+		fmt.Fprintln(e.Stdout, e.Lang.T("nothingLinked"))
+	}
+	return err
 }
 
 func label(a store.Account) string {

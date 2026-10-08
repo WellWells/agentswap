@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ type harness struct {
 	srv   *httptest.Server
 	now   time.Time
 	lang  ui.Lang
+	exe   string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -90,6 +92,7 @@ func (h *harness) run(args ...string) (int, string, string) {
 		},
 		Now:     func() time.Time { return h.now },
 		Home:    h.home,
+		Exe:     h.exe,
 		Version: "test",
 		Lang:    h.lang,
 		Width:   80,
@@ -105,9 +108,50 @@ func TestProgramNameSelectsProvider(t *testing.T) {
 			t.Errorf("%s: code=%d out=%q err=%q", argv0, code, out, errs)
 		}
 	}
-	code, out, _ := h.run("agentswap", "codex", "list")
-	if code != 0 || !strings.Contains(out, "No saved codex accounts") {
-		t.Errorf("agentswap codex: %d %q", code, out)
+	for _, args := range [][]string{{"agentswap", "codex", "list"}, {"agentswap", "cxswap", "list"}} {
+		code, out, _ := h.run(args...)
+		if code != 0 || !strings.Contains(out, "No saved codex accounts") {
+			t.Errorf("%v: %d %q", args, code, out)
+		}
+	}
+}
+
+func TestLinkAndUnlinkCommands(t *testing.T) {
+	h := newHarness(t)
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	dir := t.TempDir()
+	h.exe = filepath.Join(dir, "agentswap"+ext)
+	os.WriteFile(h.exe, []byte("bin"), 0o755)
+	code, out, errs := h.run("agentswap", "link")
+	if code != 0 || !strings.Contains(out, "Linked cxswap, codexswap, ccswap, claudeswap in "+dir) {
+		t.Fatalf("link: code=%d out=%q err=%q", code, out, errs)
+	}
+	for _, n := range []string{"cxswap", "codexswap", "ccswap", "claudeswap"} {
+		if b, err := os.ReadFile(filepath.Join(dir, n+ext)); err != nil || string(b) != "bin" {
+			t.Errorf("%s: %q %v", n, b, err)
+		}
+	}
+	code, out, _ = h.run("agentswap", "unlink")
+	if code != 0 || !strings.Contains(out, "Removed cxswap, codexswap, ccswap, claudeswap") {
+		t.Fatalf("unlink: code=%d out=%q", code, out)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Fatalf("left %v", entries)
+	}
+	code, out, _ = h.run("agentswap", "unlink")
+	if code != 0 || !strings.Contains(out, "No command links") {
+		t.Fatalf("second unlink: code=%d out=%q", code, out)
+	}
+}
+
+func TestLinkWithoutExecutable(t *testing.T) {
+	h := newHarness(t)
+	code, _, errs := h.run("agentswap", "link")
+	if code != 1 || !strings.Contains(errs, "cannot locate the agentswap executable") {
+		t.Fatalf("code=%d err=%q", code, errs)
 	}
 }
 
