@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/WellWells/agentswap/internal/fsx"
 	"github.com/WellWells/agentswap/internal/swap"
@@ -22,7 +24,14 @@ var (
 	ErrKeyringStore  = errors.New("codex stores credentials outside auth.json (cli_auth_credentials_store); only \"file\" is supported")
 )
 
-type Provider struct{ Home string }
+type Provider struct {
+	Home       string
+	BaseURL    string
+	RefreshURL string
+	UserAgent  string
+	Client     *http.Client
+	Now        func() time.Time
+}
 
 func (p Provider) Name() string { return "codex" }
 
@@ -127,6 +136,13 @@ func firstNonEmpty(s ...string) string {
 }
 
 func storeMode(config []byte) string {
+	if v := topLevel(config, "cli_auth_credentials_store"); v != "" {
+		return strings.ToLower(v)
+	}
+	return "file"
+}
+
+func topLevel(config []byte, key string) string {
 	sc := bufio.NewScanner(bytes.NewReader(config))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -137,13 +153,9 @@ func storeMode(config []byte) string {
 			break
 		}
 		k, v, ok := strings.Cut(line, "=")
-		if !ok || strings.TrimSpace(k) != "cli_auth_credentials_store" {
-			continue
-		}
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
-		if v != "" {
-			return strings.ToLower(v)
+		if ok && strings.TrimSpace(k) == key {
+			return strings.Trim(strings.TrimSpace(v), `"'`)
 		}
 	}
-	return "file"
+	return ""
 }

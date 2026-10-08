@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/WellWells/agentswap/internal/codex"
 	"github.com/WellWells/agentswap/internal/store"
@@ -20,6 +22,16 @@ type Env struct {
 	Getenv  func(string) string
 	Home    string
 	Version string
+	Now     func() time.Time
+}
+
+const usageTimeout = 10 * time.Second
+
+func (e Env) now() time.Time {
+	if e.Now != nil {
+		return e.Now()
+	}
+	return time.Now()
 }
 
 type provider struct {
@@ -31,7 +43,11 @@ type provider struct {
 
 var providers = map[string]provider{
 	"codex": {name: "codex", supported: true, login: "codex login", open: func(e Env) swap.Provider {
-		return codex.Provider{Home: e.dir("CODEX_HOME", ".codex")}
+		return codex.Provider{
+			Home:       e.dir("CODEX_HOME", ".codex"),
+			RefreshURL: e.Getenv("CODEX_REFRESH_TOKEN_URL_OVERRIDE"),
+			UserAgent:  "agentswap/" + e.Version,
+		}
 	}},
 	"claude": {name: "claude"},
 }
@@ -179,7 +195,9 @@ func doSwitch(e Env, m *swap.Manager, q string) error {
 }
 
 func list(e Env, prog string, p provider, m *swap.Manager) error {
-	st, err := m.Status()
+	ctx, cancel := context.WithTimeout(context.Background(), usageTimeout)
+	defer cancel()
+	st, usage, err := m.Usage(ctx, true)
 	if err != nil {
 		return err
 	}
@@ -188,20 +206,26 @@ func list(e Env, prog string, p provider, m *swap.Manager) error {
 		fmt.Fprintf(e.Stdout, "No saved %s accounts. Log in with `%s`, then run `%s add`.\n", p.name, p.login, prog)
 		return nil
 	}
+	now := e.now()
 	w := tabwriter.NewWriter(e.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, " \t#\tALIAS\tACCOUNT\tPLAN")
+	fmt.Fprintln(w, " \t#\tALIAS\tACCOUNT\tPLAN\t5H\tWEEK\tUPDATED")
 	for i, a := range r.Accounts {
 		mark := " "
 		if a.Key == r.Active {
 			mark = "*"
 		}
-		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n", mark, i+1, a.Alias, a.Email, a.Plan)
+		res, ok := usage[a.Key]
+		plan := firstNonEmpty(res.Usage.Plan, a.Plan, "-")
+		short, long := buckets(res.Usage, now)
+		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n", mark, i+1, a.Alias, a.Email, plan, short, long, freshness(res, ok, now))
 	}
 	return w.Flush()
 }
 
 func status(e Env, prog string, m *swap.Manager) error {
-	st, err := m.Status()
+	ctx, cancel := context.WithTimeout(context.Background(), usageTimeout)
+	defer cancel()
+	st, usage, err := m.Usage(ctx, false)
 	if err != nil {
 		return err
 	}
@@ -212,10 +236,100 @@ func status(e Env, prog string, m *swap.Manager) error {
 	r := st.Registry
 	if i := r.Index(st.Live.Key); i >= 0 {
 		fmt.Fprintf(e.Stdout, "Using #%d %s\n", i+1, label(r.Accounts[i]))
+	} else {
+		fmt.Fprintf(e.Stdout, "Using %s (not saved; run `%s add`)\n", st.Live.Email, prog)
+	}
+	res, ok := usage[st.Live.Key]
+	if !ok {
 		return nil
 	}
-	fmt.Fprintf(e.Stdout, "Using %s (not saved; run `%s add`)\n", st.Live.Email, prog)
+	if res.Err != nil {
+		fmt.Fprintf(e.Stdout, "Usage unavailable: %v\n", res.Err)
+		return nil
+	}
+	now := e.now()
+	for _, win := range res.Usage.Windows {
+		line := fmt.Sprintf("%-6s %3d%%", windowName(win.Minutes)+":", win.Percent(now))
+		if !win.ResetsAt.IsZero() && win.ResetsAt.After(now) {
+			line += "  resets " + resetTime(win.ResetsAt, now)
+		}
+		fmt.Fprintln(e.Stdout, line)
+	}
+	if !res.Usage.Live {
+		fmt.Fprintf(e.Stdout, "(from the local session log, %s)\n", ago(now.Sub(res.Usage.At)))
+	}
 	return nil
+}
+
+func buckets(u swap.Usage, now time.Time) (string, string) {
+	short, long := "-", "-"
+	for _, w := range u.Windows {
+		v := fmt.Sprintf("%d%%", w.Percent(now))
+		if w.Minutes > 0 && w.Minutes <= 24*60 {
+			short = v
+		} else {
+			long = v
+		}
+	}
+	return short, long
+}
+
+func freshness(r swap.UsageResult, ok bool, now time.Time) string {
+	switch {
+	case !ok || errors.Is(r.Err, codex.ErrNoUsage):
+		return "-"
+	case errors.Is(r.Err, codex.ErrLoginExpired):
+		return "login-expired"
+	case r.Err != nil:
+		return "unavailable"
+	case r.Usage.Live:
+		return "now"
+	default:
+		return ago(now.Sub(r.Usage.At))
+	}
+}
+
+func ago(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+func windowName(minutes int) string {
+	switch {
+	case minutes == 7*24*60:
+		return "week"
+	case minutes > 0 && minutes%(24*60) == 0:
+		return fmt.Sprintf("%dd", minutes/(24*60))
+	case minutes > 0 && minutes%60 == 0:
+		return fmt.Sprintf("%dh", minutes/60)
+	default:
+		return fmt.Sprintf("%dm", minutes)
+	}
+}
+
+func resetTime(t, now time.Time) string {
+	t, now = t.Local(), now.Local()
+	if t.YearDay() == now.YearDay() && t.Year() == now.Year() {
+		return t.Format("15:04")
+	}
+	return t.Format("01/02 15:04")
+}
+
+func firstNonEmpty(s ...string) string {
+	for _, v := range s {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func label(a store.Account) string {

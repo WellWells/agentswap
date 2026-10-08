@@ -4,21 +4,40 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type harness struct {
 	t     *testing.T
 	home  string
 	codex string
+	usage map[string]string
+	srv   *httptest.Server
+	now   time.Time
 }
 
 func newHarness(t *testing.T) *harness {
 	home := t.TempDir()
-	return &harness{t: t, home: home, codex: filepath.Join(home, ".codex")}
+	h := &harness{t: t, home: home, codex: filepath.Join(home, ".codex"), usage: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour)}
+	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := h.usage[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+		if r.URL.Path != "/backend-api/wham/usage" || !ok {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		io.WriteString(w, body)
+	}))
+	t.Cleanup(h.srv.Close)
+	os.MkdirAll(h.codex, 0o700)
+	os.WriteFile(filepath.Join(h.codex, "config.toml"), []byte(`chatgpt_base_url = "`+h.srv.URL+`/backend-api"`+"\n"), 0o600)
+	return h
 }
 
 func (h *harness) login(email, user, account string) {
@@ -35,6 +54,7 @@ func (h *harness) login(email, user, account string) {
 		"auth_mode": "chatgpt",
 		"tokens": map[string]any{
 			"id_token":      enc.EncodeToString([]byte("{}")) + "." + enc.EncodeToString(claims) + ".sig",
+			"access_token":  "at-" + user,
 			"refresh_token": "rt-" + user,
 			"account_id":    account,
 		},
@@ -59,10 +79,13 @@ func (h *harness) liveRefresh() string {
 func (h *harness) run(args ...string) (int, string, string) {
 	var out, errb bytes.Buffer
 	code := Run(Env{
-		Args:    args,
-		Stdout:  &out,
-		Stderr:  &errb,
-		Getenv:  func(string) string { return "" },
+		Args:   args,
+		Stdout: &out,
+		Stderr: &errb,
+		Getenv: func(k string) string {
+			return map[string]string{"CODEX_REFRESH_TOKEN_URL_OVERRIDE": h.srv.URL + "/oauth/token"}[k]
+		},
+		Now:     func() time.Time { return h.now },
 		Home:    h.home,
 		Version: "test",
 	})
@@ -199,5 +222,75 @@ func TestRemoveAndAlias(t *testing.T) {
 	_, out, _ = h.run("cxswap", "list")
 	if !strings.Contains(out, "No saved codex accounts") {
 		t.Fatalf("after rm: %q", out)
+	}
+}
+
+const plusUsage = `{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":18000,"reset_at":1791436850},"secondary_window":{"used_percent":10,"limit_window_seconds":604800,"reset_at":1791998357}}}`
+
+const proliteUsage = `{"plan_type":"prolite","rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":604800,"reset_at":1791970861}}}`
+
+func row(t *testing.T, out, email string) []string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, email) {
+			return strings.Fields(strings.TrimPrefix(line, "*"))
+		}
+	}
+	t.Fatalf("no row for %s in:\n%s", email, out)
+	return nil
+}
+
+func TestListShowsLiveUsage(t *testing.T) {
+	h := newHarness(t)
+	h.usage["at-u1"] = plusUsage
+	h.usage["at-u2"] = proliteUsage
+	h.login("alice@x.com", "u1", "a1")
+	h.run("cxswap", "add")
+	h.login("bob@x.com", "u2", "a2")
+	h.run("cxswap", "add")
+	code, out, errs := h.run("cxswap")
+	if code != 0 || !strings.Contains(out, "5H") || !strings.Contains(out, "WEEK") {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	if got := strings.Join(row(t, out, "alice@x.com")[2:], " "); got != "plus 42% 10% now" {
+		t.Fatalf("alice row: %q", got)
+	}
+	if got := strings.Join(row(t, out, "bob@x.com")[2:], " "); got != "prolite - 7% now" {
+		t.Fatalf("bob row: %q", got)
+	}
+}
+
+func TestListTreatsElapsedWindowAsZero(t *testing.T) {
+	h := newHarness(t)
+	h.usage["at-u1"] = plusUsage
+	h.now = time.Unix(1791436850, 0).Add(time.Minute)
+	h.login("alice@x.com", "u1", "a1")
+	h.run("cxswap", "add")
+	_, out, _ := h.run("cxswap")
+	if got := row(t, out, "alice@x.com")[3]; got != "0%" {
+		t.Fatalf("5h after reset: %q\n%s", got, out)
+	}
+}
+
+func TestListMarksUnavailableUsage(t *testing.T) {
+	h := newHarness(t)
+	h.login("alice@x.com", "u1", "a1")
+	h.run("cxswap", "add")
+	code, out, _ := h.run("cxswap")
+	if code != 0 || !strings.Contains(out, "unavailable") {
+		t.Fatalf("%d %q", code, out)
+	}
+}
+
+func TestStatusShowsUsageWindows(t *testing.T) {
+	h := newHarness(t)
+	h.usage["at-u1"] = plusUsage
+	h.login("alice@x.com", "u1", "a1")
+	h.run("cxswap", "add")
+	code, out, _ := h.run("cxswap", "status")
+	for _, want := range []string{"Using #1 alice@x.com", "5h:", "42%", "week:", "10%", "resets"} {
+		if code != 0 || !strings.Contains(out, want) {
+			t.Fatalf("missing %q in %q", want, out)
+		}
 	}
 }

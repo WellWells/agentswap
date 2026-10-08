@@ -46,7 +46,7 @@ func (m *Manager) now() time.Time {
 func (m *Manager) withRegistry(fn func(r *store.Registry, l live) error) error {
 	timeout := m.LockTimeout
 	if timeout == 0 {
-		timeout = 5 * time.Second
+		timeout = 15 * time.Second
 	}
 	lk, err := fsx.Acquire(m.S.LockPath(), timeout, 2*time.Minute)
 	if err != nil {
