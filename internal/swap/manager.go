@@ -43,7 +43,7 @@ func (m *Manager) now() time.Time {
 	return time.Now()
 }
 
-func (m *Manager) withRegistry(fn func(r *store.Registry, l live) error) error {
+func (m *Manager) withRegistry(hold bool, fn func(r *store.Registry, l live) error) error {
 	timeout := m.LockTimeout
 	if timeout == 0 {
 		timeout = 15 * time.Second
@@ -57,7 +57,27 @@ func (m *Manager) withRegistry(fn func(r *store.Registry, l live) error) error {
 	if err != nil {
 		return err
 	}
+	if err := m.S.Migrate(); err != nil {
+		return err
+	}
+	unlock := func() {}
+	if ll, ok := m.P.(LiveLocker); ok {
+		if unlock, err = ll.LockLive(); err != nil {
+			return err
+		}
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			unlock()
+		}
+	}
+	defer release()
 	l, err := m.sync(r)
+	if !hold {
+		release()
+	}
 	if err != nil {
 		return err
 	}
@@ -103,7 +123,7 @@ func (m *Manager) save(r *store.Registry, l live, alias string) (store.Account, 
 
 func (m *Manager) Add(alias string) (store.Account, error) {
 	var out store.Account
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(true, func(r *store.Registry, l live) error {
 		if l.raw == nil {
 			return ErrNoLive
 		}
@@ -128,7 +148,7 @@ func (m *Manager) Add(alias string) (store.Account, error) {
 
 func (m *Manager) Import(raw []byte, alias string) (store.Account, error) {
 	var out store.Account
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(true, func(r *store.Registry, l live) error {
 		id, err := m.P.Identify(raw)
 		if err != nil {
 			return err
@@ -159,7 +179,7 @@ func (m *Manager) Import(raw []byte, alias string) (store.Account, error) {
 func (m *Manager) Switch(q string) (store.Account, bool, error) {
 	var out store.Account
 	changed := false
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(true, func(r *store.Registry, l live) error {
 		i, err := r.Find(q)
 		if err != nil {
 			return err
@@ -199,7 +219,7 @@ func (m *Manager) Switch(q string) (store.Account, bool, error) {
 
 func (m *Manager) Status() (Status, error) {
 	var st Status
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(false, func(r *store.Registry, l live) error {
 		st = Status{Registry: r, Live: l.id, LiveOK: l.ok()}
 		return m.S.Save(r)
 	})
@@ -208,7 +228,7 @@ func (m *Manager) Status() (Status, error) {
 
 func (m *Manager) Remove(q string) (store.Account, error) {
 	var out store.Account
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(false, func(r *store.Registry, l live) error {
 		i, err := r.Find(q)
 		if err != nil {
 			return err
@@ -224,7 +244,7 @@ func (m *Manager) Remove(q string) (store.Account, error) {
 }
 
 func (m *Manager) SetAlias(q, alias string) error {
-	return m.withRegistry(func(r *store.Registry, l live) error {
+	return m.withRegistry(false, func(r *store.Registry, l live) error {
 		i, err := r.Find(q)
 		if err != nil {
 			return err

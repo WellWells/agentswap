@@ -47,7 +47,7 @@ type usageJob struct {
 func (m *Manager) Usage(ctx context.Context, all bool) (Status, map[string]UsageResult, error) {
 	var st Status
 	results := map[string]UsageResult{}
-	err := m.withRegistry(func(r *store.Registry, l live) error {
+	err := m.withRegistry(false, func(r *store.Registry, l live) error {
 		st = Status{Registry: r, Live: l.id, LiveOK: l.ok()}
 		reader, ok := m.P.(UsageReader)
 		if !ok {

@@ -7,6 +7,10 @@ type Identity struct {
 	Mode  string
 }
 
+type LiveLocker interface {
+	LockLive() (func(), error)
+}
+
 type Provider interface {
 	Name() string
 	ReadLive() ([]byte, error)

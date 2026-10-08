@@ -1,6 +1,7 @@
 package swap
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -256,5 +257,54 @@ func TestImportOfLiveAccountAlsoRefreshesLive(t *testing.T) {
 	}
 	if string(f.live) != "a|alice@x.com|new" || snapshot(t, m, "a") != "a|alice@x.com|new" {
 		t.Fatalf("live=%q snap=%q", f.live, snapshot(t, m, "a"))
+	}
+}
+
+type lockingProvider struct {
+	*fakeProvider
+	events []string
+}
+
+func (l *lockingProvider) LockLive() (func(), error) {
+	l.events = append(l.events, "lock")
+	return func() { l.events = append(l.events, "unlock") }, nil
+}
+
+func (l *lockingProvider) WriteLive(b []byte) error {
+	l.events = append(l.events, "write")
+	return l.fakeProvider.WriteLive(b)
+}
+
+func (l *lockingProvider) Usage(ctx context.Context, snap []byte, active bool) (Usage, []byte, error) {
+	l.events = append(l.events, "usage")
+	return Usage{}, nil, nil
+}
+
+func TestSwitchHoldsLiveLockUntilWritten(t *testing.T) {
+	m, f := newManager(t)
+	lp := &lockingProvider{fakeProvider: f}
+	m.P = lp
+	addAccount(t, m, f, "k1|a@x|1", "")
+	addAccount(t, m, f, "k2|b@x|1", "")
+	lp.events = nil
+	if _, _, err := m.Switch("1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(lp.events, ","); got != "lock,write,unlock" {
+		t.Fatalf("events %s", got)
+	}
+}
+
+func TestUsageReleasesLiveLockBeforeFn(t *testing.T) {
+	m, f := newManager(t)
+	lp := &lockingProvider{fakeProvider: f}
+	m.P = lp
+	addAccount(t, m, f, "k1|a@x|1", "")
+	lp.events = nil
+	if _, _, err := m.Usage(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(lp.events, ","); got != "lock,unlock,usage" {
+		t.Fatalf("events %s", got)
 	}
 }
