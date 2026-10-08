@@ -42,22 +42,6 @@ jobs:
           go-version-file: go.mod
       - run: go test ./...
 
-  build:
+  verify:
     needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version: stable
-      - env:
-          GOPROXY: 'off'
-          GOFLAGS: -mod=mod
-        run: |
-          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          go run ./tools/dist -version "dev-${GITHUB_SHA::7}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: agentswap-${{ github.sha }}
-          path: dist/
-          retention-days: 14
+    uses: ./.github/workflows/verify.yml

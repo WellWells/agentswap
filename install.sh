@@ -16,7 +16,9 @@ case "$(uname -m)" in
   *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
-if [ "$version" = latest ]; then
+if [ -n "${AGENTSWAP_DOWNLOAD_URL:-}" ]; then
+  base="${AGENTSWAP_DOWNLOAD_URL%/}"
+elif [ "$version" = latest ]; then
   base="https://github.com/$repo/releases/latest/download"
 else
   base="https://github.com/$repo/releases/download/$version"

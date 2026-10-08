@@ -7,7 +7,7 @@
     $dir = if ($env:AGENTSWAP_INSTALL_DIR) { $env:AGENTSWAP_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'agentswap\bin' }
     $version = if ($env:AGENTSWAP_VERSION) { $env:AGENTSWAP_VERSION } else { 'latest' }
     $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'amd64' }
-    $base = if ($version -eq 'latest') { "https://github.com/$repo/releases/latest/download" } else { "https://github.com/$repo/releases/download/$version" }
+    $base = if ($env:AGENTSWAP_DOWNLOAD_URL) { $env:AGENTSWAP_DOWNLOAD_URL.TrimEnd('/') } elseif ($version -eq 'latest') { "https://github.com/$repo/releases/latest/download" } else { "https://github.com/$repo/releases/download/$version" }
     $asset = "agentswap_windows_$arch.zip"
 
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())

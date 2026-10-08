@@ -32,7 +32,7 @@ Homebrew (macOS / Linux):
 brew install wellwells/tap/agentswap
 ```
 
-None of these need `xattr`, "Open Anyway" or `Unblock-File`: they verify the SHA256 against `checksums.txt` and install a binary that macOS Gatekeeper and Windows SmartScreen do not flag. Set `AGENTSWAP_VERSION` (for example `v1.0.0`) to pin a version and `AGENTSWAP_INSTALL_DIR` to change where the script installs.
+None of these need `xattr`, "Open Anyway" or `Unblock-File`: they verify the SHA256 against `checksums.txt` and install a binary that macOS Gatekeeper and Windows SmartScreen do not flag. Set `AGENTSWAP_VERSION` (for example `v1.0.0`) to pin a version `AGENTSWAP_INSTALL_DIR` to change where the script installs, and `AGENTSWAP_DOWNLOAD_URL` to download the archives from a mirror.
 
 Or download an archive from [Releases](https://github.com/WellWells/agentswap/releases) and verify it against `checksums.txt`. Archives opened from a browser download are flagged as untrusted; prefer the commands above.
 

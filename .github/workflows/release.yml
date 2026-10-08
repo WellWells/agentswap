@@ -5,88 +5,66 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version: stable
+      - run: go vet ./...
       - run: go test ./...
-      - env:
-          GOPROXY: 'off'
-          GOFLAGS: -mod=mod
-        run: |
-          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          mkdir -p brew
-          go run ./tools/dist -version "${GITHUB_REF_NAME}" -brew brew/agentswap.rb
-      - uses: actions/upload-artifact@v4
+
+  verify:
+    needs: test
+    uses: ./.github/workflows/verify.yml
+    with:
+      version: ${{ github.ref_name }}
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          name: formula
-          path: brew/agentswap.rb
+          name: dist
+          path: dist
       - env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           pre=""
           case "${GITHUB_REF_NAME}" in *-*) pre="--prerelease" ;; esac
           gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag $pre
 
-  verify-unix:
-    needs: release
+  smoke:
+    needs: publish
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, macos-15-intel, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      AGENTSWAP_VERSION: ${{ github.ref_name }}
     steps:
-      - env:
-          AGENTSWAP_VERSION: ${{ github.ref_name }}
+      - if: runner.os != 'Windows'
         run: |
           curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/install.sh" | sh
-          export PATH="$HOME/.local/bin:$PATH"
-          agentswap version | grep -F "${GITHUB_REF_NAME#v}"
-          cxswap version
-          if [ "$(uname -s)" = Darwin ]; then
-            if xattr -p com.apple.quarantine "$HOME/.local/bin/agentswap" >/dev/null 2>&1; then
-              echo "agentswap is quarantined" >&2
-              exit 1
-            fi
-            codesign -v "$HOME/.local/bin/agentswap" || [ "$(uname -m)" = x86_64 ]
-          fi
-      - if: runner.os == 'macOS'
-        uses: actions/download-artifact@v4
-        with:
-          name: formula
-      - if: runner.os == 'macOS'
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: '1'
-        run: |
-          brew tap-new --no-git local/agentswap
-          cp agentswap.rb "$(brew --repository)/Library/Taps/local/homebrew-agentswap/Formula/agentswap.rb"
-          brew install local/agentswap/agentswap
-          brew test local/agentswap/agentswap
-          "$(brew --prefix)/bin/cxswap" version
-          "$(brew --prefix)/bin/agyswap" version
-
-  verify-windows:
-    needs: release
-    runs-on: windows-latest
-    steps:
-      - shell: powershell
-        env:
-          AGENTSWAP_VERSION: ${{ github.ref_name }}
+          "$HOME/.local/bin/cxswap" version | grep -F "${GITHUB_REF_NAME}"
+      - if: runner.os == 'Windows'
+        shell: powershell
         run: |
           irm "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/install.ps1" | iex
-          cxswap version
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          $zone = Get-Item "$env:LOCALAPPDATA\agentswap\bin\agentswap.exe" -Stream Zone.Identifier -ErrorAction SilentlyContinue
-          if ($zone) { throw 'agentswap.exe has a Mark of the Web' }
+          $out = cxswap version | Out-String
+          if ($out -notmatch [regex]::Escape($env:GITHUB_REF_NAME)) { throw "unexpected version: $out" }
 
   homebrew:
-    needs: [verify-unix, verify-windows]
+    needs: smoke
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
@@ -94,13 +72,18 @@ jobs:
         with:
           name: formula
       - env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
-          if [ -z "$TAP_TOKEN" ]; then
-            echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew tap was not updated"
+          if [ -z "$TAP_KEY" ]; then
+            echo "::warning::HOMEBREW_TAP_DEPLOY_KEY is not set; the Homebrew tap was not updated"
             exit 0
           fi
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/WellWells/homebrew-tap.git" tap
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_KEY" > ~/.ssh/homebrew_tap
+          chmod 600 ~/.ssh/homebrew_tap
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/homebrew_tap -o IdentitiesOnly=yes"
+          git clone git@github.com:WellWells/homebrew-tap.git tap
           mkdir -p tap/Formula
           cp agentswap.rb tap/Formula/agentswap.rb
           cd tap
