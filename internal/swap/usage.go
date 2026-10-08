@@ -45,10 +45,26 @@ type usageJob struct {
 }
 
 func (m *Manager) Usage(ctx context.Context, all bool) (Status, map[string]UsageResult, error) {
+	return m.usage(ctx, all, "")
+}
+
+func (m *Manager) UsageOf(ctx context.Context, q string) (Status, map[string]UsageResult, error) {
+	return m.usage(ctx, true, q)
+}
+
+func (m *Manager) usage(ctx context.Context, all bool, q string) (Status, map[string]UsageResult, error) {
 	var st Status
 	results := map[string]UsageResult{}
 	err := m.withRegistry(false, func(r *store.Registry, l live) error {
 		st = Status{Registry: r, Live: l.id, LiveOK: l.ok()}
+		accounts := r.Accounts
+		if q != "" {
+			i, err := r.Find(q)
+			if err != nil {
+				return err
+			}
+			accounts = r.Accounts[i : i+1]
+		}
 		reader, ok := m.P.(UsageReader)
 		if !ok {
 			return m.S.Save(r)
@@ -59,7 +75,7 @@ func (m *Manager) Usage(ctx context.Context, all bool) (Status, map[string]Usage
 				jobs = append(jobs, usageJob{l.id.Key, l.raw, true})
 			}
 		} else {
-			for _, a := range r.Accounts {
+			for _, a := range accounts {
 				snap, err := m.S.ReadSnapshot(a.Key)
 				if err != nil {
 					results[a.Key] = UsageResult{Err: err}
@@ -71,7 +87,7 @@ func (m *Manager) Usage(ctx context.Context, all bool) (Status, map[string]Usage
 				}
 				jobs = append(jobs, usageJob{a.Key, snap, active})
 			}
-			if l.ok() && r.Index(l.id.Key) < 0 {
+			if q == "" && l.ok() && r.Index(l.id.Key) < 0 {
 				jobs = append(jobs, usageJob{l.id.Key, l.raw, true})
 			}
 		}

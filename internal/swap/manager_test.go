@@ -372,3 +372,21 @@ func TestAdoptSavesLiveCopyAndNeverWritesLive(t *testing.T) {
 		t.Fatalf("existing overwritten: %q", got)
 	}
 }
+
+func TestUsageOfQueriesOnlyThatAccount(t *testing.T) {
+	m, f := newManager(t)
+	ur := &usageRecorder{fakeProvider: f, active: map[string]bool{}}
+	m.P = ur
+	addAccount(t, m, f, "k1|a@x|1", "")
+	addAccount(t, m, f, "k2|b@x|1", "work")
+	st, res, err := m.UsageOf(context.Background(), "1")
+	if err != nil || len(res) != 1 || len(ur.active) != 1 {
+		t.Fatalf("err=%v res=%v queried=%v", err, res, ur.active)
+	}
+	if _, ok := res["k1"]; !ok || st.Registry == nil {
+		t.Fatalf("res=%v", res)
+	}
+	if _, _, err := m.UsageOf(context.Background(), "nobody"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("err=%v", err)
+	}
+}

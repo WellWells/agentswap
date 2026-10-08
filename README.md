@@ -43,7 +43,7 @@ cxswap                 # usage of every saved account
 cxswap list            # account numbers and switch commands
 cxswap 2               # switch by number, alias or email
 cxswap -               # switch back
-cxswap status
+cxswap status 2        # usage of one account (number, alias or email)
 cxswap alias 2 home
 cxswap rm 2
 ```
@@ -56,9 +56,10 @@ Restart Codex after switching, including `codex app-server daemon restart`. `COD
 
 ```sh
 ccswap add work        # save the account signed in to Claude Code now
-ccswap import          # or bring accounts over from cswap (claude-swap)
+ccswap import          # or import accounts from another tool
 
 ccswap                 # usage of every saved account
+ccswap status work     # usage of one account
 ccswap list
 ccswap 2               # switch; running sessions follow on their next request
 ```

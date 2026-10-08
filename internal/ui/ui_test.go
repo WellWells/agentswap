@@ -267,18 +267,21 @@ func TestStateFromError(t *testing.T) {
 func TestUsageColumnsAligned(t *testing.T) {
 	for _, l := range []Lang{En, ZhTW} {
 		for _, key := range []string{"usage", "usageClaude"} {
-			checkUsageColumns(t, l, l.T(key, "cxswap"))
+			checkUsageColumns(t, l, l.T(key, "cxswap"), "  cxswap")
 		}
+		checkUsageColumns(t, l, l.T("usageAgentswap"), "  agentswap")
 	}
 }
 
-func checkUsageColumns(t *testing.T, l Lang, text string) {
+func checkUsageColumns(t *testing.T, l Lang, text, prefix string) {
 	t.Helper()
 	col := -1
+	lines := 0
 	for _, line := range strings.Split(text, "\n") {
-		if !strings.HasPrefix(line, "  cxswap") || strings.HasSuffix(line, "version") {
+		if !strings.HasPrefix(line, prefix) {
 			continue
 		}
+		lines++
 		i := strings.LastIndex(line, "  ")
 		w := displayWidth(line[:i+2])
 		if col == -1 {
@@ -286,6 +289,9 @@ func checkUsageColumns(t *testing.T, l Lang, text string) {
 		} else if w != col {
 			t.Errorf("lang %d: %q starts at column %d, want %d", l, line, w, col)
 		}
+	}
+	if lines < 4 {
+		t.Errorf("lang %d: only %d command lines in %q", l, lines, text)
 	}
 }
 

@@ -751,3 +751,62 @@ func TestImportOnlyForClaude(t *testing.T) {
 		t.Fatalf("code %d", code)
 	}
 }
+
+func TestStatusShowsOneAccount(t *testing.T) {
+	h := newHarness(t)
+	setupTwo(t, h)
+	code, out, errs := h.run("cxswap", "status", "1")
+	if code != 0 || !strings.Contains(out, "Codex · #1 <alice@x.com>") || strings.Contains(out, "bob@x.com") {
+		t.Fatalf("%d %q %q", code, out, errs)
+	}
+	code, out, _ = h.run("cxswap", "status", "bob")
+	if code != 0 || !strings.Contains(out, "#2 <bob@x.com> · prolite  ● active") || strings.Contains(out, "alice") {
+		t.Fatalf("%d %q", code, out)
+	}
+	code, out, _ = h.run("cxswap", "status")
+	if code != 0 || !strings.Contains(out, "alice") || !strings.Contains(out, "bob") {
+		t.Fatalf("all %d %q", code, out)
+	}
+	code, _, errs = h.run("cxswap", "status", "9")
+	if code != 1 || !strings.Contains(errs, "no account #9") {
+		t.Fatalf("missing %d %q", code, errs)
+	}
+}
+
+func TestHelpIsSpecificToEachCommand(t *testing.T) {
+	h := newHarness(t)
+	cases := []struct {
+		args       []string
+		want, deny []string
+	}{
+		{[]string{"cxswap", "help"}, []string{"cxswap status [account]", "cxswap login [alias]", "cxswap <account>", "<account> is the number shown by `cxswap list`"}, []string{"import"}},
+		{[]string{"ccswap", "--help"}, []string{"ccswap status [account]", "ccswap import", "/login", "<account> is the number shown by `ccswap list`"}, []string{"ccswap login", "from cswap", "asks where"}},
+		{[]string{"agentswap", "help"}, []string{"agentswap claude <command>", "agentswap codex <command>", "agentswap link", "ccswap help"}, []string{"login [alias]"}},
+	}
+	for _, c := range cases {
+		code, out, _ := h.run(c.args...)
+		if code != 0 {
+			t.Fatalf("%v: code %d", c.args, code)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%v: missing %q in\n%s", c.args, w, out)
+			}
+		}
+		for _, d := range c.deny {
+			if strings.Contains(out, d) {
+				t.Errorf("%v: should not contain %q", c.args, d)
+			}
+		}
+	}
+	h.lang = ui.ZhTW
+	_, out, _ := h.run("ccswap", "help")
+	if strings.Contains(out, "從 cswap") || strings.Contains(out, "詢問來源") {
+		t.Errorf("zh help names a third-party tool or is verbose:\n%s", out)
+	}
+	for _, w := range []string{"ccswap status [帳號]", "ccswap import", "<帳號>"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("zh: missing %q in\n%s", w, out)
+		}
+	}
+}
