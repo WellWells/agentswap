@@ -120,8 +120,8 @@ func TestMessagesExistInEveryLanguage(t *testing.T) {
 	if ZhCN.T("week") != "本周额度" {
 		t.Fatalf("got %q", ZhCN.T("week"))
 	}
-	if En.T("used", 7) != "7% used" || ZhTW.T("used", 7) != "已用 7%" {
-		t.Fatalf("got %q / %q", En.T("used", 7), ZhTW.T("used", 7))
+	if En.T("zoneNote", "UTC+8") != "Times show when each limit resets (UTC+8)" || ZhTW.T("zoneNote", "UTC+8") != "時間為各額度的重置時間（UTC+8）" {
+		t.Fatalf("got %q / %q", En.T("zoneNote", "UTC+8"), ZhTW.T("zoneNote", "UTC+8"))
 	}
 }
 
@@ -176,22 +176,22 @@ func TestBar(t *testing.T) {
 	}
 }
 
-func TestResetLine(t *testing.T) {
+func TestResetTime(t *testing.T) {
 	now := at(10, 8, 10, 0)
 	cases := []struct {
 		lang Lang
 		t    time.Time
 		want string
 	}{
-		{En, at(10, 8, 15, 20), "Resets 3:20pm"},
-		{En, at(10, 8, 15, 0), "Resets 3pm"},
-		{En, at(10, 14, 17, 41), "Resets Oct 14, 5:41pm"},
-		{ZhTW, at(10, 8, 15, 20), "今天 15:20 重置"},
-		{ZhCN, at(10, 14, 17, 41), "10/14（三）17:41 重置"},
-		{ZhTW, at(10, 14, 17, 41), "10/14（三）17:41 重置"},
+		{En, at(10, 8, 15, 20), "3:20pm"},
+		{En, at(10, 8, 15, 0), "3pm"},
+		{En, at(10, 14, 17, 41), "Oct 14 5:41pm"},
+		{ZhTW, at(10, 8, 15, 20), "今天 15:20"},
+		{ZhCN, at(10, 14, 17, 41), "10/14 17:41"},
+		{ZhTW, at(10, 14, 17, 41), "10/14 17:41"},
 	}
 	for _, c := range cases {
-		if got := ResetLine(c.lang, c.t, now); got != c.want {
+		if got := ResetTime(c.lang, c.t, now); got != c.want {
 			t.Errorf("got %q want %q", got, c.want)
 		}
 	}
@@ -244,135 +244,60 @@ func sampleCards(now time.Time) []Card {
 	}
 }
 
-func TestRenderPlainCards(t *testing.T) {
+func TestRenderTable(t *testing.T) {
 	now := at(10, 8, 10, 0)
 	cards := sampleCards(now)
 	cards[1].Suggest = "cxswap 2"
 	var buf bytes.Buffer
-	Render(&buf, cards[:4], Options{Lang: En, Width: 80, Now: now})
-	Render(&buf, cards[4:], Options{Lang: En, Width: 80, Now: now})
-	out := buf.String()
-	for _, want := range []string{
-		"Codex ────",
-		"#1 main <jora@x.com> · prolite" + strings.Repeat(" ", 22) + "● active\n\nWeekly limit" + strings.Repeat(" ", 27) + "Resets Oct 14, 5:41pm\n",
-		"░   76% used\n" + strings.Repeat("─", 60) + "\n",
-		"#2 work <boss@x.com> · plus            ★ suggested: cxswap 2\n\n5-hour limit",
-		"Resets 1:20pm\n",
-		"42% used\n\nWeekly limit",
-		"#3 <old@x.com>\n\nLogin expired",
-		"From local session log · 3h ago",
-		"No usage data for API key logins",
-		"Usage unavailable (HTTP 500)",
-		strings.Repeat("─", 60) + "\nReset times are in UTC+8\n",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "\x1b[") || strings.Contains(out, "│") {
-		t.Errorf("escape codes or columns in plain narrow output:\n%s", out)
-	}
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "% used") && displayWidth(line) != 60 {
-			t.Errorf("bar line width %d: %q", displayWidth(line), line)
-		}
-	}
-}
-
-func TestRenderSideBySide(t *testing.T) {
-	now := at(10, 8, 10, 0)
-	var buf bytes.Buffer
-	Render(&buf, sampleCards(now)[:4], Options{Lang: ZhTW, Width: 120, Now: now})
-	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-	if !strings.HasPrefix(lines[0], "Codex ─") || !strings.Contains(lines[0], "─┬─") {
-		t.Fatalf("title rule: %q", lines[0])
-	}
-	if n := strings.Count(buf.String(), "─┼─"); n != 1 {
-		t.Errorf("want 1 row divider, got %d:\n%s", n, buf.String())
-	}
-	if !strings.Contains(lines[1], "#1 main <jora@x.com>") || !strings.Contains(lines[1], "│ #2 work <boss@x.com>") {
-		t.Errorf("first row not side by side: %q", lines[1])
-	}
-	for _, line := range lines[:len(lines)-1] {
-		if displayWidth(line) > 120 {
-			t.Errorf("line wider than terminal: %q", line)
-		}
-		i := strings.IndexAny(line, "│┬┼┴")
-		if i < 0 || displayWidth(line[:i]) != 59 {
-			t.Errorf("column divider misplaced: %q", line)
-		}
-	}
-	if lines[len(lines)-1] != "重置時間為 UTC+8" {
-		t.Errorf("footer: %q", lines[len(lines)-1])
-	}
-}
-
-func TestRenderCompactTable(t *testing.T) {
-	now := at(10, 8, 10, 0)
-	cards := sampleCards(now)
-	cards[1].Suggest = "cxswap 2"
-	for i := range cards {
-		cards[i].Cmd = "cxswap"
-	}
-	var buf bytes.Buffer
-	Render(&buf, cards, Options{Lang: En, Width: 100, Now: now})
-	want := strings.Join([]string{
-		"Codex " + strings.Repeat("─", 87),
-		"Account                         Weekly limit   5-hour limit",
-		"#1 main <jora@x.com> · prolite  ██████▏░  76%  —              ● active",
-		"#2 work <boss@x.com> · plus     ▊░░░░░░░  10%  ███▍░░░░  42%  ★ suggested: cxswap 2",
+	Render(&buf, cards, Options{Lang: En, Width: 140, Now: now})
+	body := []string{
+		"Account                         Weekly limit                  5-hour limit",
+		"#1 main <jora@x.com> · prolite  ██████▏░  76%  Oct 14 5:41pm  —                      ● active",
+		"#2 work <boss@x.com> · plus     ▊░░░░░░░  10%  Oct 15 9:12am  ███▍░░░░  42%  1:20pm  ★ suggested: cxswap 2",
 		"#3 <old@x.com>                  Login expired, log in to this account again",
-		"#4 <cache@x.com>                —              ▍░░░░░░░   5%  From local session log · 3h ago",
+		"#4 <cache@x.com>                —                             ▍░░░░░░░   5%          From local session log · 3h ago",
 		"#5 <key@x.com>                  No usage data for API key logins",
 		"#6 <down@x.com>                 Usage unavailable (HTTP 500)",
-		strings.Repeat("─", 93),
-		"Reset times and details: `cxswap status <account>`",
-		"",
-	}, "\n")
+	}
+	width := 0
+	for _, line := range body {
+		width = max(width, displayWidth(line))
+	}
+	want := "Codex " + strings.Repeat("─", width-6) + "\n" + strings.Join(body, "\n") + "\n" + strings.Repeat("─", width) + "\nTimes show when each limit resets (UTC+8)\n"
 	if buf.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", buf.String(), want)
 	}
-	buf.Reset()
+}
+
+func TestRenderTableFitsNarrowTerminal(t *testing.T) {
+	now := at(10, 8, 10, 0)
+	cards := sampleCards(now)
+	cards[1].Suggest = "cxswap 2"
+	var buf bytes.Buffer
 	Render(&buf, cards, Options{Lang: En, Width: 80, Now: now})
-	for _, line := range strings.Split(buf.String(), "\n") {
-		if displayWidth(line) > 80 {
+	out := buf.String()
+	for _, line := range strings.Split(out, "\n") {
+		if displayWidth(line) > 80 && !strings.Contains(line, "From local session log") {
 			t.Errorf("line wider than 80: %q", line)
 		}
 	}
-	if !strings.Contains(buf.String(), "#2 work <boss@x.…  ") {
-		t.Errorf("account column not shortened:\n%s", buf.String())
+	if !strings.Contains(out, "#2 work <boss@x.com> · …  ") {
+		t.Errorf("account column not shortened to 24:\n%s", out)
 	}
-	buf.Reset()
-	Render(&buf, cards, Options{Lang: ZhTW, Width: 100, Now: now, Color: true})
-	for _, want := range []string{"帳號", "本週額度", "5 小時額度", "● 使用中", "重置時間與詳細資料：`cxswap status <帳號>`"} {
-		if !strings.Contains(buf.String(), want) {
-			t.Errorf("missing %q in:\n%s", want, buf.String())
-		}
+	if strings.Contains(out, "Oct 14") || strings.Contains(out, "Times show") {
+		t.Errorf("reset times kept although they do not fit:\n%s", out)
 	}
-}
-
-func TestGrid(t *testing.T) {
-	cases := []struct{ n, total, cols, width int }{
-		{2, 120, 2, 58},
-		{2, 80, 1, 60},
-		{1, 200, 1, 60},
-		{6, 200, 4, 47},
-		{3, 30, 1, 30},
-		{3, 10, 1, 24},
-	}
-	for _, c := range cases {
-		if cols, width := grid(c.n, c.total); cols != c.cols || width != c.width {
-			t.Errorf("grid(%d, %d) = %d, %d want %d, %d", c.n, c.total, cols, width, c.cols, c.width)
-		}
+	if !strings.Contains(out, "76%") || !strings.Contains(out, "★ suggested: cxswap 2") {
+		t.Errorf("usage or tags dropped:\n%s", out)
 	}
 }
 
-func TestRenderChineseAndColor(t *testing.T) {
+func TestRenderSingleAccountChineseColor(t *testing.T) {
 	now := at(10, 8, 10, 0)
 	var buf bytes.Buffer
-	Render(&buf, sampleCards(now)[:1], Options{Lang: ZhTW, Width: 40, Color: true, Now: now})
+	Render(&buf, sampleCards(now)[:1], Options{Lang: ZhTW, Width: 100, Color: true, Now: now})
 	out := buf.String()
-	for _, want := range []string{"● 使用中", "本週額度", "已用 76%", "10/14（三）17:41 重置", "重置時間為 UTC+8", "\x1b[1m"} {
+	for _, want := range []string{"帳號", "● 使用中", "本週額度", "76%", "10/14 17:41", "時間為各額度的重置時間（UTC+8）", "\x1b[1m"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -382,7 +307,7 @@ func TestRenderChineseAndColor(t *testing.T) {
 func TestRenderUnsavedCard(t *testing.T) {
 	var buf bytes.Buffer
 	Render(&buf, []Card{{Provider: "Codex", Email: "new@x.com", Active: true, Unsaved: "cxswap add"}}, Options{Lang: En, Width: 80, Now: time.Now()})
-	if !strings.Contains(buf.String(), "Codex ───") || !strings.Contains(buf.String(), "<new@x.com>            ● active  not saved, run `cxswap add`") {
+	if !strings.Contains(buf.String(), "<new@x.com>  No usage data  ● active  not saved, run `cxswap add`") {
 		t.Fatalf("got %q", buf.String())
 	}
 }

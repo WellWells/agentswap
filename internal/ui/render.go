@@ -43,7 +43,6 @@ type Card struct {
 	Usage    swap.Usage
 	State    State
 	Detail   string
-	Cmd      string
 }
 
 type Options struct {
@@ -120,42 +119,25 @@ func Bar(pct, width int, color bool) string {
 	return s
 }
 
-var zhWeekdays = []string{"日", "一", "二", "三", "四", "五", "六"}
-
-func ResetLine(l Lang, t, now time.Time) string {
+func ResetTime(l Lang, t, now time.Time) string {
 	t = t.In(now.Location())
 	y1, m1, d1 := t.Date()
 	y2, m2, d2 := now.Date()
 	today := y1 == y2 && m1 == m2 && d1 == d2
 	if l != En {
-		clock := t.Format("15:04")
 		if today {
-			return "今天 " + clock + " 重置"
+			return "今天 " + t.Format("15:04")
 		}
-		return t.Format("01/02") + "（" + zhWeekdays[t.Weekday()] + "）" + clock + " 重置"
+		return t.Format("01/02 15:04")
 	}
 	clock := t.Format("3:04pm")
 	if t.Minute() == 0 {
 		clock = t.Format("3pm")
 	}
 	if today {
-		return "Resets " + clock
+		return clock
 	}
-	return "Resets " + t.Format("Jan 2") + ", " + clock
-}
-
-const (
-	minCardWidth = 40
-	maxCardWidth = 60
-	gutter       = " │ "
-	compactAfter = 4
-)
-
-func grid(n, total int) (int, int) {
-	cols := (total + 3) / (minCardWidth + 3)
-	cols = max(1, min(cols, n))
-	width := (total - 3*(cols-1)) / cols
-	return cols, max(24, min(width, maxCardWidth))
+	return t.Format("Jan 2") + " " + clock
 }
 
 func Render(w io.Writer, cards []Card, o Options) {
@@ -165,46 +147,7 @@ func Render(w io.Writer, cards []Card, o Options) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		if len(group) > compactAfter {
-			table(w, group, o, p)
-			continue
-		}
-		cols, width := grid(len(group), o.Width)
-		fmt.Fprintln(w, rule(p, group[0].Provider, cols, width, "┬"))
-		for r := 0; r < len(group); r += cols {
-			if r > 0 {
-				fmt.Fprintln(w, rule(p, "", cols, width, "┼"))
-			}
-			row := group[r:min(r+cols, len(group))]
-			heads, bodies := make([][]string, len(row)), make([][]string, len(row))
-			top := 0
-			for j, c := range row {
-				var rs bool
-				heads[j], bodies[j], rs = block(c, width, o, p)
-				resets = resets || rs
-				top = max(top, len(heads[j]))
-			}
-			blocks := make([][]string, cols)
-			height := 0
-			for j := range row {
-				for len(heads[j]) < top {
-					heads[j] = append(heads[j], "")
-				}
-				blocks[j] = append(append(heads[j], ""), bodies[j]...)
-				height = max(height, len(blocks[j]))
-			}
-			for y := 0; y < height; y++ {
-				cells := make([]string, cols)
-				for j, b := range blocks {
-					if y < len(b) {
-						cells[j] = b[y]
-					}
-					cells[j] = padVisible(cells[j], width)
-				}
-				fmt.Fprintln(w, strings.TrimRight(strings.Join(cells, p.color(colorDim, gutter)), " "))
-			}
-		}
-		fmt.Fprintln(w, rule(p, "", cols, width, "┴"))
+		resets = table(w, group, o, p) || resets
 	}
 	if resets {
 		fmt.Fprintln(w, p.color(colorDim, o.Lang.T("zoneNote", ZoneLabel(o.Zone, o.Now))))
@@ -222,12 +165,8 @@ func byProvider(cards []Card) [][]Card {
 	return groups
 }
 
-func rule(p painter, title string, cols, width int, joint string) string {
-	segs := make([]string, cols)
-	for i := range segs {
-		segs[i] = strings.Repeat("─", width)
-	}
-	line := []rune(strings.Join(segs, "─"+joint+"─"))
+func rule(p painter, title string, width int) string {
+	line := []rune(strings.Repeat("─", width))
 	if title == "" {
 		return p.color(colorDim, string(line))
 	}
@@ -235,102 +174,45 @@ func rule(p painter, title string, cols, width int, joint string) string {
 	return p.bold(title) + " " + p.color(colorDim, string(line[n:]))
 }
 
-func block(c Card, width int, o Options, p painter) ([]string, []string, bool) {
-	l := o.Lang
-	title := truncate(cardTitle(c), width)
-	head := []string{p.bold(title)}
-	var badges []string
-	if c.Active {
-		badges = append(badges, p.color(colorActive, l.T("active")))
-	}
-	if c.Suggest != "" {
-		badges = append(badges, p.color(colorWarn, l.T("suggest", c.Suggest)))
-	}
-	if c.Unsaved != "" {
-		badges = append(badges, p.color(colorDim, l.T("unsaved", c.Unsaved)))
-	}
-	joined := strings.Join(badges, "  ")
-	switch gap := width - displayWidth(title) - visibleWidth(joined); {
-	case joined == "":
-	case gap >= 2:
-		head[0] += strings.Repeat(" ", gap) + joined
-	case visibleWidth(joined) <= width:
-		head = append(head, joined)
-	default:
-		head = append(head, badges...)
-	}
-	var lines []string
-	note := func(code int, s string) []string { return append(lines, p.color(code, truncate(s, width))) }
-	switch c.State {
-	case LoginExpired:
-		return head, note(colorCrit, l.T("loginExpired")), false
-	case NoUsage:
-		return head, note(colorDim, l.T("noUsage")), false
-	case Unavailable:
-		return head, note(colorDim, l.T("unavailable", c.Detail)), false
-	}
-	if len(c.Usage.Windows) == 0 {
-		lines = note(colorDim, l.T("noData"))
-	}
-	resets := false
-	pctWidth := displayWidth(l.T("used", 100))
-	for j, win := range c.Usage.Windows {
-		if j > 0 {
-			lines = append(lines, "")
-		}
-		pct := win.Percent(o.Now)
-		name := truncate(l.WindowTitle(win.Minutes, win.Label), width)
-		label := p.bold(name)
-		if !win.ResetsAt.IsZero() && win.ResetsAt.After(o.Now) {
-			resets = true
-			when := ResetLine(l, win.ResetsAt, o.Now)
-			if gap := width - displayWidth(name) - displayWidth(when); gap >= 2 {
-				label += strings.Repeat(" ", gap) + p.color(colorDim, when)
-			} else {
-				lines = append(lines, label)
-				label = p.color(colorDim, truncate(when, width))
-			}
-		}
-		used := l.T("used", pct)
-		if pct >= 80 {
-			used = p.color(fillColor(pct), used)
-		}
-		lines = append(lines, label, Bar(pct, width-pctWidth-2, o.Color)+"  "+padLeft(used, pctWidth))
-	}
-	if !c.Usage.Live && !c.Usage.At.IsZero() {
-		lines = append(lines, "")
-		lines = note(colorDim, l.T("fallback", l.Ago(o.Now.Sub(c.Usage.At))))
-	}
-	return head, lines, resets
-}
-
 type windowKey struct {
 	minutes int
 	label   string
 }
 
-func table(w io.Writer, group []Card, o Options, p painter) {
+type column struct {
+	key   windowKey
+	head  string
+	width int
+	reset int
+}
+
+const usageWidth = 13
+
+func resetsAt(win swap.Window, o Options) string {
+	if win.ResetsAt.IsZero() || !win.ResetsAt.After(o.Now) {
+		return ""
+	}
+	return ResetTime(o.Lang, win.ResetsAt, o.Now)
+}
+
+func table(w io.Writer, group []Card, o Options, p painter) bool {
 	l := o.Lang
-	var keys []windowKey
-	seen := map[windowKey]bool{}
+	var cols []column
+	index := map[windowKey]int{}
 	for _, c := range group {
 		if c.State != OK {
 			continue
 		}
 		for _, win := range c.Usage.Windows {
-			if k := (windowKey{win.Minutes, win.Label}); !seen[k] {
-				seen[k] = true
-				keys = append(keys, k)
+			k := windowKey{win.Minutes, win.Label}
+			i, ok := index[k]
+			if !ok {
+				i = len(cols)
+				index[k] = i
+				cols = append(cols, column{key: k, head: l.WindowTitle(k.minutes, k.label)})
 			}
+			cols[i].reset = max(cols[i].reset, displayWidth(resetsAt(win, o)))
 		}
-	}
-	heads := make([]string, len(keys))
-	cellWidths := make([]int, len(keys))
-	cells := 0
-	for i, k := range keys {
-		heads[i] = l.WindowTitle(k.minutes, k.label)
-		cellWidths[i] = max(displayWidth(heads[i]), 13)
-		cells += cellWidths[i] + 2
 	}
 	nameWidth := displayWidth(l.T("colAccount"))
 	tags := make([]string, len(group))
@@ -342,13 +224,31 @@ func table(w io.Writer, group []Card, o Options, p painter) {
 			tagWidth = max(tagWidth, visibleWidth(tags[j])+2)
 		}
 	}
-	nameWidth = min(nameWidth, max(16, o.Width-cells-tagWidth))
+	layout := func(withResets bool) int {
+		cells := 0
+		for i := range cols {
+			cols[i].width = usageWidth
+			if withResets && cols[i].reset > 0 {
+				cols[i].width += 2 + cols[i].reset
+			}
+			cols[i].width = max(cols[i].width, displayWidth(cols[i].head))
+			cells += cols[i].width + 2
+		}
+		return cells
+	}
+	cells := layout(true)
+	showResets := true
+	if min(nameWidth, 24)+cells+tagWidth > o.Width {
+		cells, showResets = layout(false), false
+	}
+	nameWidth = min(nameWidth, max(24, o.Width-cells-tagWidth))
 
 	header := pad(l.T("colAccount"), nameWidth)
-	for i, h := range heads {
-		header += "  " + pad(h, cellWidths[i])
+	for _, col := range cols {
+		header += "  " + pad(col.head, col.width)
 	}
 	lines := []string{p.color(colorDim, strings.TrimRight(header, " "))}
+	shown := false
 	for j, c := range group {
 		line := pad(truncate(cardTitle(c), nameWidth), nameWidth)
 		var msg string
@@ -368,8 +268,10 @@ func table(w io.Writer, group []Card, o Options, p painter) {
 		if msg != "" {
 			line += "  " + padVisible(p.color(code, truncate(msg, max(o.Width-nameWidth-2, 16))), cells-2)
 		} else {
-			for i, k := range keys {
-				line += "  " + padVisible(usageCell(c, k, cellWidths[i], o, p), cellWidths[i])
+			for _, col := range cols {
+				cell, rs := usageCell(c, col, showResets, o, p)
+				shown = shown || rs
+				line += "  " + padVisible(cell, col.width)
 			}
 		}
 		if tags[j] != "" {
@@ -382,14 +284,12 @@ func table(w io.Writer, group []Card, o Options, p painter) {
 		ruleWidth = max(ruleWidth, visibleWidth(line))
 	}
 	ruleWidth = min(ruleWidth, o.Width)
-	fmt.Fprintln(w, rule(p, group[0].Provider, 1, ruleWidth, ""))
+	fmt.Fprintln(w, rule(p, group[0].Provider, ruleWidth))
 	for _, line := range lines {
 		fmt.Fprintln(w, line)
 	}
-	fmt.Fprintln(w, rule(p, "", 1, ruleWidth, ""))
-	if group[0].Cmd != "" {
-		fmt.Fprintln(w, p.color(colorDim, l.T("compactHint", group[0].Cmd)))
-	}
+	fmt.Fprintln(w, rule(p, "", ruleWidth))
+	return shown
 }
 
 func rowTags(c Card, o Options, p painter) string {
@@ -410,9 +310,9 @@ func rowTags(c Card, o Options, p painter) string {
 	return strings.Join(tags, "  ")
 }
 
-func usageCell(c Card, k windowKey, width int, o Options, p painter) string {
+func usageCell(c Card, col column, showResets bool, o Options, p painter) (string, bool) {
 	for _, win := range c.Usage.Windows {
-		if win.Minutes != k.minutes || win.Label != k.label {
+		if win.Minutes != col.key.minutes || win.Label != col.key.label {
 			continue
 		}
 		pct := win.Percent(o.Now)
@@ -420,9 +320,15 @@ func usageCell(c Card, k windowKey, width int, o Options, p painter) string {
 		if pct >= 80 {
 			text = p.color(fillColor(pct), text)
 		}
-		return Bar(pct, width-5, o.Color) + " " + text
+		bar := col.width - 5
+		if !showResets || col.reset == 0 {
+			return Bar(pct, bar, o.Color) + " " + text, false
+		}
+		when := resetsAt(win, o)
+		cell := Bar(pct, bar-2-col.reset, o.Color) + " " + text + "  " + p.color(colorDim, when)
+		return cell, when != ""
 	}
-	return p.color(colorDim, "—")
+	return p.color(colorDim, "—"), false
 }
 
 func cardTitle(c Card) string {
