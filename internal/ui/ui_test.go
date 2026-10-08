@@ -331,3 +331,29 @@ func TestDisplayWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestModelWindowTitleAndHeadroom(t *testing.T) {
+	if got := En.WindowTitle(7*24*60, "Sonnet"); got != En.WindowName(7*24*60)+" (Sonnet)" {
+		t.Fatalf("en: %q", got)
+	}
+	if got := ZhTW.WindowTitle(7*24*60, "Opus"); got != ZhTW.WindowName(7*24*60)+"（Opus）" {
+		t.Fatalf("zh: %q", got)
+	}
+	if got := En.WindowTitle(300, ""); got != En.WindowName(300) {
+		t.Fatalf("plain: %q", got)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	c := Card{State: OK, Usage: swap.Usage{Live: true, Windows: []swap.Window{
+		{UsedPercent: 20, Minutes: 300},
+		{UsedPercent: 30, Minutes: 7 * 24 * 60},
+		{UsedPercent: 99, Minutes: 7 * 24 * 60, Label: "Opus"},
+	}}}
+	if room, ok := headroom(c, now); !ok || room != 70 {
+		t.Fatalf("headroom = %d %v", room, ok)
+	}
+	var b strings.Builder
+	Render(&b, []Card{c}, Options{Lang: En, Width: 80, Now: now})
+	if !strings.Contains(b.String(), "(Opus)") {
+		t.Fatalf("render: %s", b.String())
+	}
+}

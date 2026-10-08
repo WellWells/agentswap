@@ -12,6 +12,7 @@ type Window struct {
 	UsedPercent int
 	Minutes     int
 	ResetsAt    time.Time
+	Label       string
 }
 
 func (w Window) Percent(now time.Time) int {

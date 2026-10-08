@@ -48,6 +48,7 @@ var messages = map[string][2]string{
 	"noUsage":      {"No usage data for API key logins", "API key 登入沒有用量資料"},
 	"unavailable":  {"Usage unavailable (%s)", "無法取得用量（%s）"},
 	"noData":       {"No usage data", "沒有用量資料"},
+	"windowModel":  {"%s (%s)", "%s（%s）"},
 	"justNow":      {"just now", "剛剛"},
 	"agoMinutes":   {"%dm ago", "%d 分鐘前"},
 	"agoHours":     {"%dh ago", "%d 小時前"},
@@ -153,6 +154,14 @@ func (l Lang) Ago(d time.Duration) string {
 	default:
 		return l.T("agoDays", int(d.Hours()/24))
 	}
+}
+
+func (l Lang) WindowTitle(minutes int, label string) string {
+	name := l.WindowName(minutes)
+	if label == "" {
+		return name
+	}
+	return l.T("windowModel", name, label)
 }
 
 func (l Lang) WindowName(minutes int) string {
