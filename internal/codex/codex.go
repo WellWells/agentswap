@@ -37,10 +37,6 @@ func (p Provider) Name() string { return "codex" }
 
 func (p Provider) AuthPath() string { return filepath.Join(p.Home, "auth.json") }
 
-func (p Provider) ApplyHint() string {
-	return "Restart Codex (CLI sessions, IDE extension, desktop app and its app-server daemon) to use the new account."
-}
-
 func (p Provider) check() error {
 	b, err := os.ReadFile(filepath.Join(p.Home, "config.toml"))
 	if errors.Is(err, os.ErrNotExist) {

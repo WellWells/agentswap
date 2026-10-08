@@ -17,8 +17,7 @@ type fakeProvider struct {
 	writes int
 }
 
-func (f *fakeProvider) Name() string      { return "fake" }
-func (f *fakeProvider) ApplyHint() string { return "restart" }
+func (f *fakeProvider) Name() string { return "fake" }
 
 func (f *fakeProvider) ReadLive() ([]byte, error) {
 	if f.live == nil {

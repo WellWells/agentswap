@@ -12,5 +12,4 @@ type Provider interface {
 	ReadLive() ([]byte, error)
 	WriteLive([]byte) error
 	Identify([]byte) (Identity, error)
-	ApplyHint() string
 }

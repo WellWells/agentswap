@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -131,13 +132,13 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 			return swap.Usage{}, nil, err
 		}
 	}
-	u, err := p.fetchUsage(ctx, c)
+	u, err := p.fetchWithRetry(ctx, c)
 	var he httpError
 	if errors.As(err, &he) && he == http.StatusUnauthorized && !active && refreshed == nil && c.refresh != "" {
 		if rerr := renew(); rerr != nil {
 			return swap.Usage{}, nil, rerr
 		}
-		u, err = p.fetchUsage(ctx, c)
+		u, err = p.fetchWithRetry(ctx, c)
 	}
 	if err != nil {
 		if su, ok := p.sessionUsage(c.user, c.account); ok {
@@ -146,6 +147,31 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 		return swap.Usage{}, refreshed, err
 	}
 	return u, refreshed, nil
+}
+
+func (p Provider) fetchWithRetry(ctx context.Context, c creds) (swap.Usage, error) {
+	u, err := p.fetchUsage(ctx, c)
+	if !transient(err) {
+		return u, err
+	}
+	select {
+	case <-ctx.Done():
+		return u, err
+	case <-time.After(300 * time.Millisecond):
+	}
+	return p.fetchUsage(ctx, c)
+}
+
+func transient(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var he httpError
+	if errors.As(err, &he) {
+		return he >= 500
+	}
+	var ue *url.Error
+	return errors.As(err, &ue)
 }
 
 func (p Provider) expiresSoon(access string) bool {

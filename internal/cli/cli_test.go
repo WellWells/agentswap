@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/WellWells/agentswap/internal/ui"
 )
 
 type harness struct {
@@ -21,6 +23,7 @@ type harness struct {
 	usage map[string]string
 	srv   *httptest.Server
 	now   time.Time
+	lang  ui.Lang
 }
 
 func newHarness(t *testing.T) *harness {
@@ -88,6 +91,8 @@ func (h *harness) run(args ...string) (int, string, string) {
 		Now:     func() time.Time { return h.now },
 		Home:    h.home,
 		Version: "test",
+		Lang:    h.lang,
+		Width:   80,
 	})
 	return code, out.String(), errb.String()
 }
@@ -131,13 +136,9 @@ func TestClaudeNotYetSupported(t *testing.T) {
 	}
 }
 
-func TestAgentswapWithoutProviderShowsUsage(t *testing.T) {
+func TestUnknownProvider(t *testing.T) {
 	h := newHarness(t)
-	code, _, errs := h.run("agentswap")
-	if code != 2 || !strings.Contains(errs, "Usage") {
-		t.Fatalf("code=%d err=%q", code, errs)
-	}
-	code, _, errs = h.run("agentswap", "gemini")
+	code, _, errs := h.run("agentswap", "gemini")
 	if code != 2 || !strings.Contains(errs, "unknown provider") {
 		t.Fatalf("code=%d err=%q", code, errs)
 	}
@@ -167,8 +168,7 @@ func TestAddListSwitchFlow(t *testing.T) {
 	}
 
 	_, out, _ := h.run("cxswap")
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 3 || !strings.HasPrefix(lines[2], "*") || !strings.Contains(lines[2], "bob@x.com") || !strings.Contains(lines[1], "work") {
+	if !strings.Contains(out, "Codex · 1 work <alice@x.com>") || !strings.Contains(out, "Codex · 2 <bob@x.com> · plus  ● active") {
 		t.Fatalf("list:\n%s", out)
 	}
 
@@ -229,34 +229,50 @@ const plusUsage = `{"plan_type":"plus","rate_limit":{"primary_window":{"used_per
 
 const proliteUsage = `{"plan_type":"prolite","rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":604800,"reset_at":1791970861}}}`
 
-func row(t *testing.T, out, email string) []string {
-	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, email) {
-			return strings.Fields(strings.TrimPrefix(line, "*"))
-		}
-	}
-	t.Fatalf("no row for %s in:\n%s", email, out)
-	return nil
-}
-
-func TestListShowsLiveUsage(t *testing.T) {
-	h := newHarness(t)
+func setupTwo(t *testing.T, h *harness) {
 	h.usage["at-u1"] = plusUsage
 	h.usage["at-u2"] = proliteUsage
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
 	h.login("bob@x.com", "u2", "a2")
 	h.run("cxswap", "add")
+}
+
+func TestListShowsUsageCards(t *testing.T) {
+	h := newHarness(t)
+	setupTwo(t, h)
 	code, out, errs := h.run("cxswap")
-	if code != 0 || !strings.Contains(out, "5H") || !strings.Contains(out, "WEEK") {
-		t.Fatalf("%d %q %q", code, out, errs)
+	for _, want := range []string{
+		"Codex · 1 <alice@x.com> · plus\n\nCurrent session\n",
+		"42% used\nResets ",
+		"Current week\n",
+		"Codex · 2 <bob@x.com> · prolite  ● active\n\nCurrent week\n",
+		"7% used\n",
+	} {
+		if code != 0 || !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s%s", want, out, errs)
+		}
 	}
-	if got := strings.Join(row(t, out, "alice@x.com")[2:], " "); got != "plus 42% 10% now" {
-		t.Fatalf("alice row: %q", got)
+	if strings.Contains(out, "suggested") {
+		t.Fatalf("active account has the most headroom, nothing to suggest:\n%s", out)
 	}
-	if got := strings.Join(row(t, out, "bob@x.com")[2:], " "); got != "prolite - 7% now" {
-		t.Fatalf("bob row: %q", got)
+}
+
+func TestSuggestsAccountWithMoreHeadroom(t *testing.T) {
+	h := newHarness(t)
+	h.usage["at-u1"] = plusUsage
+	h.usage["at-u2"] = proliteUsage
+	h.login("bob@x.com", "u2", "a2")
+	h.run("cxswap", "add")
+	h.login("alice@x.com", "u1", "a1")
+	h.run("cxswap", "add")
+	_, out, _ := h.run("cxswap")
+	if !strings.Contains(out, "Codex · 1 <bob@x.com> · prolite  ★ suggested: cxswap 1") {
+		t.Fatalf("cxswap:\n%s", out)
+	}
+	_, out, _ = h.run("agentswap")
+	if !strings.Contains(out, "★ suggested: agentswap codex 1") {
+		t.Fatalf("agentswap:\n%s", out)
 	}
 }
 
@@ -267,8 +283,8 @@ func TestListTreatsElapsedWindowAsZero(t *testing.T) {
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
 	_, out, _ := h.run("cxswap")
-	if got := row(t, out, "alice@x.com")[3]; got != "0%" {
-		t.Fatalf("5h after reset: %q\n%s", got, out)
+	if !strings.Contains(out, "Current session\n") || !strings.Contains(out, "  0% used\n") || strings.Contains(out, "42% used") {
+		t.Fatalf("5h window after its reset:\n%s", out)
 	}
 }
 
@@ -277,20 +293,55 @@ func TestListMarksUnavailableUsage(t *testing.T) {
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
 	code, out, _ := h.run("cxswap")
-	if code != 0 || !strings.Contains(out, "unavailable") {
+	if code != 0 || !strings.Contains(out, "Usage unavailable (HTTP 500)") {
 		t.Fatalf("%d %q", code, out)
 	}
 }
 
-func TestStatusShowsUsageWindows(t *testing.T) {
+func TestStatusShowsActiveCardOnly(t *testing.T) {
 	h := newHarness(t)
-	h.usage["at-u1"] = plusUsage
-	h.login("alice@x.com", "u1", "a1")
-	h.run("cxswap", "add")
+	setupTwo(t, h)
 	code, out, _ := h.run("cxswap", "status")
-	for _, want := range []string{"Using #1 alice@x.com", "5h:", "42%", "week:", "10%", "resets"} {
-		if code != 0 || !strings.Contains(out, want) {
-			t.Fatalf("missing %q in %q", want, out)
-		}
+	if code != 0 || !strings.Contains(out, "Codex · 2 <bob@x.com> · prolite  ● active") || strings.Contains(out, "alice@x.com") {
+		t.Fatalf("%d:\n%s", code, out)
+	}
+}
+
+func TestAgentswapOverview(t *testing.T) {
+	h := newHarness(t)
+	code, out, _ := h.run("agentswap")
+	if code != 0 || !strings.Contains(out, "No saved accounts yet") {
+		t.Fatalf("empty overview: %d %q", code, out)
+	}
+	setupTwo(t, h)
+	code, out, _ = h.run("agentswap")
+	if code != 0 || !strings.Contains(out, "Codex · 1 <alice@x.com>") || !strings.Contains(out, "Codex · 2 <bob@x.com>") {
+		t.Fatalf("overview: %d\n%s", code, out)
+	}
+	code, out, _ = h.run("agentswap", "help")
+	if code != 0 || !strings.Contains(out, "Usage") {
+		t.Fatalf("help: %d %q", code, out)
+	}
+}
+
+func TestChineseMessages(t *testing.T) {
+	h := newHarness(t)
+	h.lang = ui.ZhTW
+	_, out, _ := h.run("cxswap")
+	if !strings.Contains(out, "尚未儲存任何 codex 帳號") {
+		t.Fatalf("empty list: %q", out)
+	}
+	setupTwo(t, h)
+	code, out, _ := h.run("cxswap", "1")
+	if code != 0 || !strings.Contains(out, "已切換到 alice@x.com") || !strings.Contains(out, "請重新啟動 Codex") {
+		t.Fatalf("switch: %q", out)
+	}
+	_, out, _ = h.run("cxswap", "status")
+	if !strings.Contains(out, "● 使用中") || !strings.Contains(out, "目前工作階段") || !strings.Contains(out, "已用 42%") {
+		t.Fatalf("status:\n%s", out)
+	}
+	code, _, errs := h.run("cxswap", "nobody")
+	if code != 1 || !strings.Contains(errs, "找不到符合的帳號：nobody") {
+		t.Fatalf("not found: %d %q", code, errs)
 	}
 }

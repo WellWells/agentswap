@@ -262,3 +262,35 @@ func TestUsageUnavailableForAPIKey(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestUsageRetriesOnceOnServerError(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		io.WriteString(w, proliteBody)
+	}))
+	defer srv.Close()
+	p := Provider{Home: t.TempDir(), BaseURL: srv.URL + "/backend-api", Now: func() time.Time { return now }}
+	tok := accessToken("a", now.Add(240*time.Hour))
+	u, _, err := p.Usage(context.Background(), authJSON(tok, "rt", "user-1", "acct-1"), true)
+	if err != nil || !u.Live || calls.Load() != 2 {
+		t.Fatalf("got %+v err=%v calls=%d", u, err, calls.Load())
+	}
+}
+
+func TestUsageDoesNotRetryClientErrors(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+	p := Provider{Home: t.TempDir(), BaseURL: srv.URL + "/backend-api", Now: func() time.Time { return now }}
+	tok := accessToken("a", now.Add(240*time.Hour))
+	if _, _, err := p.Usage(context.Background(), authJSON(tok, "rt", "user-1", "acct-1"), true); err == nil || calls.Load() != 1 {
+		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+}
