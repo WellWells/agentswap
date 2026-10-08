@@ -251,7 +251,7 @@ func (e Env) report(prog string, p provider, err error) int {
 }
 
 func printVersion(e Env) {
-	fmt.Fprintf(e.Stdout, "agentswap %s\nhttps://github.com/WellWells/agentswap\nby WellsTsai · https://wellstsai.com\n", e.Version)
+	fmt.Fprint(e.Stdout, e.Lang.T("version", e.Version))
 }
 
 func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) error {

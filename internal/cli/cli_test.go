@@ -213,6 +213,17 @@ func TestVersion(t *testing.T) {
 			}
 		}
 	}
+	_, out, _ := h.run("ccswap", "version")
+	want := "agentswap test\n\n  Source  https://github.com/WellWells/agentswap\n  Author  WellsTsai · https://wellstsai.com\n"
+	if out != want {
+		t.Errorf("layout:\n%s", out)
+	}
+	h.lang = ui.ZhTW
+	_, out, _ = h.run("ccswap", "version")
+	want = "agentswap test\n\n  原始碼  https://github.com/WellWells/agentswap\n  作者    WellsTsai · https://wellstsai.com\n"
+	if out != want {
+		t.Errorf("zh layout:\n%s", out)
+	}
 }
 
 func TestAddListSwitchFlow(t *testing.T) {

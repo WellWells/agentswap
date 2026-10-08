@@ -76,6 +76,7 @@ var messages = map[string][2]string{
 	"switched":               {"Switched to %s", "已切換到 %s"},
 	"hintCodex":              {"Restart Codex CLI sessions, the IDE extension and the desktop app if they are open; they keep using the old account until restarted.", "請重新啟動 Codex 已開啟的 CLI、IDE 擴充功能與桌面版，重啟前它們仍使用舊帳號。"},
 	"emptyProvider":          {"No saved %[1]s accounts. Run `%[3]s add` to save the account signed in now, or `%[3]s login` to sign in to another one.", "尚未儲存任何 %[1]s 帳號。執行 `%[3]s add` 儲存目前登入的帳號，或執行 `%[3]s login` 登入其他帳號。"},
+	"version":                {"agentswap %s\n\n  Source  https://github.com/WellWells/agentswap\n  Author  WellsTsai · https://wellstsai.com\n", "agentswap %s\n\n  原始碼  https://github.com/WellWells/agentswap\n  作者    WellsTsai · https://wellstsai.com\n"},
 	"emptyAll":               {"No saved accounts yet. Log in to an agent (for example `codex login`, or `/login` in Claude Code), then run `cxswap add` or `ccswap add`.", "目前沒有任何已儲存的帳號。請先登入（例如 `codex login`，或在 Claude Code 執行 `/login`），再執行 `cxswap add` 或 `ccswap add`。"},
 	"emptyClaude":            {"No saved Claude Code accounts. Sign in with Claude Code (`/login`), then run `%[3]s add`; or run `%[3]s import` to import existing accounts.", "尚未儲存任何 Claude Code 帳號。請先用 Claude Code 登入（`/login`），再執行 `%[3]s add`；或執行 `%[3]s import` 匯入既有帳號。"},
 	"listAddMoreClaude":      {"To add another account, sign in to it with Claude Code (`/login`), then run `%[1]s add`.", "要加入其他帳號：先用 Claude Code 登入該帳號（`/login`），再執行 `%[1]s add`。"},
