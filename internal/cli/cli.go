@@ -114,7 +114,7 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 	}
 	switch {
 	case cmd == "" || cmd == "list" || cmd == "ls":
-		return list(e, p, m)
+		return list(e, prog, p, m)
 	case cmd == "status" || cmd == "current":
 		return status(e, prog, m)
 	case cmd == "add":
@@ -178,14 +178,14 @@ func doSwitch(e Env, m *swap.Manager, q string) error {
 	return nil
 }
 
-func list(e Env, p provider, m *swap.Manager) error {
+func list(e Env, prog string, p provider, m *swap.Manager) error {
 	st, err := m.Status()
 	if err != nil {
 		return err
 	}
 	r := st.Registry
 	if len(r.Accounts) == 0 {
-		fmt.Fprintf(e.Stdout, "No saved %s accounts. Log in with `%s`, then run `add`.\n", p.name, p.login)
+		fmt.Fprintf(e.Stdout, "No saved %s accounts. Log in with `%s`, then run `%s add`.\n", p.name, p.login, prog)
 		return nil
 	}
 	w := tabwriter.NewWriter(e.Stdout, 0, 0, 2, ' ', 0)

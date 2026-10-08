@@ -83,6 +83,21 @@ func TestProgramNameSelectsProvider(t *testing.T) {
 	}
 }
 
+func TestEmptyListShowsFullAddCommand(t *testing.T) {
+	h := newHarness(t)
+	cases := map[string][]string{
+		"`cxswap add`":          {"cxswap"},
+		"`codexswap add`":       {"codexswap", "list"},
+		"`agentswap codex add`": {"agentswap", "codex"},
+	}
+	for want, args := range cases {
+		_, out, _ := h.run(args...)
+		if !strings.Contains(out, want) {
+			t.Errorf("%v: want %s in %q", args, want, out)
+		}
+	}
+}
+
 func TestClaudeNotYetSupported(t *testing.T) {
 	h := newHarness(t)
 	for _, args := range [][]string{{"ccswap"}, {"claudeswap", "list"}, {"agentswap", "claude"}} {
