@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -305,6 +306,66 @@ func TestRenderAlignsProviders(t *testing.T) {
 	}
 	if strings.Index(heads[0], "5-hour") > strings.Index(heads[0], "Weekly limit") {
 		t.Errorf("5-hour column should come first:\n%s", buf.String())
+	}
+}
+
+func TestRenderLabeledColumnsAfterPlain(t *testing.T) {
+	now := at(10, 8, 10, 0)
+	cards := []Card{
+		{Provider: "Codex", Number: 1, Email: "a@x.com", Active: true, Usage: swap.Usage{Live: true, Windows: []swap.Window{
+			{UsedPercent: 42, Minutes: 300, ResetsAt: at(10, 8, 13, 20)},
+			{UsedPercent: 10, Minutes: 10080, ResetsAt: at(10, 15, 9, 0)},
+		}}},
+		{Provider: "Claude Code", Number: 1, Email: "c@x.com", Active: true, Usage: swap.Usage{Live: true, Windows: []swap.Window{
+			{UsedPercent: 5, Minutes: 300, ResetsAt: at(10, 8, 13, 0)},
+			{UsedPercent: 6, Minutes: 10080, ResetsAt: at(10, 15, 9, 0)},
+			{UsedPercent: 7, Minutes: 10080, Label: "Fable", ResetsAt: at(10, 15, 9, 0)},
+		}}},
+		{Provider: "Antigravity", Number: 1, Email: "b@x.com", Active: true, Usage: swap.Usage{Live: true, Windows: []swap.Window{
+			{UsedPercent: 1, Minutes: 300, ResetsAt: at(10, 8, 13, 0)},
+			{UsedPercent: 2, Minutes: 300, Label: "Claude and GPT", ResetsAt: at(10, 8, 13, 0)},
+			{UsedPercent: 3, Minutes: 10080, ResetsAt: at(10, 15, 9, 0)},
+			{UsedPercent: 4, Minutes: 10080, Label: "Claude and GPT", ResetsAt: at(10, 15, 9, 0)},
+		}}},
+	}
+	var buf bytes.Buffer
+	Render(&buf, cards, Options{Lang: En, Width: 200, Now: now})
+	var heads []string
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.HasPrefix(line, "Account") {
+			heads = append(heads, line)
+		}
+	}
+	if len(heads) != 3 {
+		t.Fatalf("want 3 headers:\n%s", buf.String())
+	}
+	h := heads[2]
+	order := []int{
+		strings.Index(h, "5-hour limit  "),
+		strings.Index(h, "Weekly limit  "),
+		strings.Index(h, "5-hour limit (Claude and GPT)"),
+		strings.Index(h, "Weekly limit (Claude and GPT)"),
+	}
+	if order[0] < 0 || !slices.IsSorted(order) {
+		t.Errorf("column order %v:\n%s", order, buf.String())
+	}
+	if a := strings.Index(heads[0], "Weekly limit"); a != order[1] {
+		t.Errorf("Weekly limit at %d and %d:\n%s", a, order[1], buf.String())
+	}
+	if strings.Contains(heads[0], "Claude and GPT") || strings.Contains(heads[1], "Claude and GPT") {
+		t.Errorf("labeled heads leak into other providers:\n%s", buf.String())
+	}
+	if a := strings.Index(heads[1], "Weekly limit (Fable)"); a != order[2] {
+		t.Errorf("Fable at %d, first labeled column at %d:\n%s", a, order[2], buf.String())
+	}
+	var active []int
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if i := strings.Index(line, "● active"); i >= 0 {
+			active = append(active, displayWidth(line[:i]))
+		}
+	}
+	if len(active) != 3 || active[0] != active[1] || active[1] != active[2] {
+		t.Errorf("active tags at %v:\n%s", active, buf.String())
 	}
 }
 

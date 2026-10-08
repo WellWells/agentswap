@@ -155,14 +155,16 @@ func Render(w io.Writer, cards []Card, o Options) {
 		}
 	}
 	layout := func(withResets bool) int {
-		cells := 0
 		for i := range cols {
 			cols[i].width = usageWidth
 			if withResets && cols[i].reset > 0 {
 				cols[i].width += 2 + cols[i].reset
 			}
 			cols[i].width = max(cols[i].width, displayWidth(cols[i].head))
-			cells += cols[i].width + 2
+		}
+		cells := 0
+		for _, group := range byProvider(cards) {
+			cells = max(cells, cellsWidth(sectionColumns(group, cols)))
 		}
 		return cells
 	}
@@ -176,7 +178,7 @@ func Render(w io.Writer, cards []Card, o Options) {
 	var sections [][]string
 	resets := false
 	for _, group := range byProvider(cards) {
-		lines, rs := table(group, cols, nameWidth, cells, showResets, o, p)
+		lines, rs := table(group, sectionColumns(group, cols), nameWidth, cells, showResets, o, p)
 		sections = append(sections, lines)
 		resets = resets || rs
 	}
@@ -264,6 +266,9 @@ func columns(cards []Card, o Options) []column {
 		cols = append(cols, column{key: k, head: o.Lang.WindowTitle(k.minutes, k.label)})
 	}
 	slices.SortFunc(cols, func(a, b column) int {
+		if c := cmp.Compare(min(len(a.key.label), 1), min(len(b.key.label), 1)); c != 0 {
+			return c
+		}
 		if c := cmp.Compare(a.key.minutes, b.key.minutes); c != 0 {
 			return c
 		}
@@ -279,6 +284,25 @@ func columns(cards []Card, o Options) []column {
 		}
 	}
 	return cols
+}
+
+func sectionColumns(group []Card, cols []column) []column {
+	has := windowKeys(group)
+	var out []column
+	for _, col := range cols {
+		if col.key.label == "" || slices.Contains(has, col.key) {
+			out = append(out, col)
+		}
+	}
+	return out
+}
+
+func cellsWidth(cols []column) int {
+	n := 0
+	for _, col := range cols {
+		n += col.width + 2
+	}
+	return n
 }
 
 func table(group []Card, cols []column, nameWidth, cells int, showResets bool, o Options, p painter) ([]string, bool) {
@@ -322,6 +346,7 @@ func table(group []Card, cols []column, nameWidth, cells int, showResets bool, o
 				}
 				line += "  " + padVisible(cell, col.width)
 			}
+			line = padVisible(line, nameWidth+cells)
 		}
 		if tags := rowTags(c, o, p); tags != "" {
 			line += "  " + tags
