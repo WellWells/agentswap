@@ -16,6 +16,7 @@ import (
 
 	"github.com/WellWells/agentswap/internal/execx"
 	"github.com/WellWells/agentswap/internal/fsx"
+	"github.com/WellWells/agentswap/internal/jsonx"
 	"github.com/WellWells/agentswap/internal/swap"
 )
 
@@ -131,17 +132,17 @@ func unpack(b []byte) (envelope, error) {
 }
 
 func accountPart(creds []byte) ([]byte, error) {
-	ms, err := members(creds)
+	ms, err := jsonx.Members(creds)
 	if err != nil {
 		return nil, fmt.Errorf(".credentials.json: %w", err)
 	}
-	var keep []member
+	var keep []jsonx.Member
 	for _, m := range ms {
-		if !shared[m.key] {
+		if !shared[m.Key] {
 			keep = append(keep, m)
 		}
 	}
-	return encodeObject(keep, false), nil
+	return jsonx.Encode(keep, false), nil
 }
 
 type aiOauth struct {
@@ -221,7 +222,7 @@ func (p Provider) ReadLive() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	oauth, ok, err := getTop(global, "oauthAccount")
+	oauth, ok, err := jsonx.Get(global, "oauthAccount")
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", p.GlobalConfig, err)
 	}
@@ -240,21 +241,21 @@ func (p Provider) WriteLive(b []byte) error {
 	if err != nil {
 		return err
 	}
-	acct, err := members(e.Credentials)
+	acct, err := jsonx.Members(e.Credentials)
 	if err != nil {
 		return err
 	}
-	var keep []member
+	var keep []jsonx.Member
 	pretty := false
 	live, err := p.readCreds()
 	switch {
 	case err == nil:
-		ms, err := members(live)
+		ms, err := jsonx.Members(live)
 		if err != nil {
 			return fmt.Errorf(".credentials.json: %w", err)
 		}
 		for _, m := range ms {
-			if shared[m.key] {
+			if shared[m.Key] {
 				keep = append(keep, m)
 			}
 		}
@@ -262,7 +263,7 @@ func (p Provider) WriteLive(b []byte) error {
 	case !errors.Is(err, fs.ErrNotExist):
 		return err
 	}
-	if err := p.writeCreds(encodeObject(append(keep, acct...), pretty)); err != nil {
+	if err := p.writeCreds(jsonx.Encode(append(keep, acct...), pretty)); err != nil {
 		return err
 	}
 	if err := p.writeConfig(e.OAuthAccount); err != nil {
@@ -287,7 +288,7 @@ func (p Provider) writeConfig(oauthAccount []byte) error {
 			perm = st.Mode().Perm()
 		}
 	}
-	out, err := setTop(global, "oauthAccount", oauthAccount)
+	out, err := jsonx.Set(global, "oauthAccount", oauthAccount)
 	if err != nil {
 		return fmt.Errorf("%s: %w", p.GlobalConfig, err)
 	}

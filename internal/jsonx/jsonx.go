@@ -1,4 +1,4 @@
-package claude
+package jsonx
 
 import (
 	"bytes"
@@ -8,13 +8,13 @@ import (
 
 var errNotObject = errors.New("not a JSON object")
 
-type member struct {
-	key        string
-	val        json.RawMessage
-	start, end int
+type Member struct {
+	Key        string
+	Val        json.RawMessage
+	Start, End int
 }
 
-func members(doc []byte) ([]member, error) {
+func Members(doc []byte) ([]Member, error) {
 	dec := json.NewDecoder(bytes.NewReader(doc))
 	tok, err := dec.Token()
 	if err != nil {
@@ -23,7 +23,7 @@ func members(doc []byte) ([]member, error) {
 	if d, ok := tok.(json.Delim); !ok || d != '{' {
 		return nil, errNotObject
 	}
-	var out []member
+	var out []Member
 	for dec.More() {
 		tok, err := dec.Token()
 		if err != nil {
@@ -38,7 +38,7 @@ func members(doc []byte) ([]member, error) {
 			return nil, err
 		}
 		end := int(dec.InputOffset())
-		out = append(out, member{key: key, val: raw, start: end - len(raw), end: end})
+		out = append(out, Member{Key: key, Val: raw, Start: end - len(raw), End: end})
 	}
 	if _, err := dec.Token(); err != nil {
 		return nil, err
@@ -46,21 +46,21 @@ func members(doc []byte) ([]member, error) {
 	return out, nil
 }
 
-func getTop(doc []byte, key string) (json.RawMessage, bool, error) {
-	ms, err := members(doc)
+func Get(doc []byte, key string) (json.RawMessage, bool, error) {
+	ms, err := Members(doc)
 	if err != nil {
 		return nil, false, err
 	}
 	for _, m := range ms {
-		if m.key == key {
-			return m.val, true, nil
+		if m.Key == key {
+			return m.Val, true, nil
 		}
 	}
 	return nil, false, nil
 }
 
-func setTop(doc []byte, key string, val []byte) ([]byte, error) {
-	ms, err := members(doc)
+func Set(doc []byte, key string, val []byte) ([]byte, error) {
+	ms, err := Members(doc)
 	if err != nil {
 		return nil, err
 	}
@@ -71,8 +71,8 @@ func setTop(doc []byte, key string, val []byte) ([]byte, error) {
 		return append(out, doc[until:]...)
 	}
 	for _, m := range ms {
-		if m.key == key {
-			return splice(m.start, m.end, val), nil
+		if m.Key == key {
+			return splice(m.Start, m.End, val), nil
 		}
 	}
 	k, _ := json.Marshal(key)
@@ -80,7 +80,7 @@ func setTop(doc []byte, key string, val []byte) ([]byte, error) {
 	var ins []byte
 	at := bytes.IndexByte(doc, '{') + 1
 	if len(ms) > 0 {
-		at = ms[len(ms)-1].end
+		at = ms[len(ms)-1].End
 		ins = append(ins, ',')
 	}
 	if pretty {
@@ -98,7 +98,7 @@ func setTop(doc []byte, key string, val []byte) ([]byte, error) {
 	return splice(at, at, ins), nil
 }
 
-func encodeObject(ms []member, pretty bool) []byte {
+func Encode(ms []Member, pretty bool) []byte {
 	var b bytes.Buffer
 	b.WriteByte('{')
 	for i, m := range ms {
@@ -108,13 +108,13 @@ func encodeObject(ms []member, pretty bool) []byte {
 		if pretty {
 			b.WriteString("\n  ")
 		}
-		k, _ := json.Marshal(m.key)
+		k, _ := json.Marshal(m.Key)
 		b.Write(k)
 		b.WriteByte(':')
 		if pretty {
 			b.WriteByte(' ')
 		}
-		b.Write(m.val)
+		b.Write(m.Val)
 	}
 	if pretty && len(ms) > 0 {
 		b.WriteByte('\n')

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/WellWells/agentswap/internal/execx"
+	"github.com/WellWells/agentswap/internal/jsonx"
 )
 
 type CswapAccount struct {
@@ -97,7 +98,7 @@ func cswapSnapshot(dir string, n int, email, kind string, keychain func(int, str
 	if err != nil {
 		return nil, err
 	}
-	oauth, ok, err := getTop(cfg, "oauthAccount")
+	oauth, ok, err := jsonx.Get(cfg, "oauthAccount")
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", cfgName, err)
 	}
