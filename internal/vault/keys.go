@@ -38,7 +38,36 @@ func decodeKey(b []byte) ([]byte, error) {
 	return k, nil
 }
 
-type keychainKey struct{ run execx.Runner }
+var errKeyLost = errors.New("the keyring no longer returns the vault key that encrypted saved accounts; refusing to create a new one")
+
+func markerPath(dir string) string { return filepath.Join(dir, ".vault-keyring") }
+
+func keyID(k []byte) string {
+	sum := sha256.Sum256(k)
+	return hex.EncodeToString(sum[:8])
+}
+
+func hasMarker(dir string) bool {
+	_, err := os.Stat(markerPath(dir))
+	return err == nil
+}
+
+func checkMarker(dir string, k []byte) ([]byte, error) {
+	b, err := os.ReadFile(markerPath(dir))
+	if err == nil && strings.TrimSpace(string(b)) != keyID(k) {
+		return nil, errKeyLost
+	}
+	return k, nil
+}
+
+func writeMarker(dir string, k []byte) error {
+	return fsx.WriteAtomic(markerPath(dir), []byte(keyID(k)+"\n"), 0o600)
+}
+
+type keychainKey struct {
+	run execx.Runner
+	dir string
+}
 
 func (keychainKey) scheme() byte { return schemeKeyring }
 
@@ -48,13 +77,17 @@ func (s keychainKey) key(create bool) ([]byte, error) {
 		return nil, err
 	}
 	if code == 0 {
-		return decodeKey(out)
+		k, err := decodeKey(out)
+		if err != nil {
+			return nil, err
+		}
+		return checkMarker(s.dir, k)
 	}
 	if code != 44 {
 		return nil, fmt.Errorf("security find-generic-password: exit %d", code)
 	}
-	if !create {
-		return nil, errors.New("vault key missing from keychain")
+	if !create || hasMarker(s.dir) {
+		return nil, errKeyLost
 	}
 	k, err := newKey()
 	if err != nil {
@@ -65,23 +98,30 @@ func (s keychainKey) key(create bool) ([]byte, error) {
 	if _, code, err := s.run([]byte(line), securityBin, "-i"); err != nil || code != 0 {
 		return nil, fmt.Errorf("security add-generic-password: exit %d %v", code, err)
 	}
-	return k, nil
+	return k, writeMarker(s.dir, k)
 }
 
-type secretToolKey struct{ run execx.Runner }
+type secretToolKey struct {
+	run execx.Runner
+	dir string
+}
 
 func (secretToolKey) scheme() byte { return schemeKeyring }
 
 func (s secretToolKey) key(create bool) ([]byte, error) {
 	out, code, err := s.run(nil, "secret-tool", "lookup", "service", service, "key", "vault")
+	if err == nil && code == 0 && len(bytes.TrimSpace(out)) > 0 {
+		k, err := decodeKey(out)
+		if err != nil {
+			return nil, err
+		}
+		return checkMarker(s.dir, k)
+	}
+	if hasMarker(s.dir) || !create {
+		return nil, errKeyLost
+	}
 	if err != nil {
 		return nil, errUnavailable
-	}
-	if code == 0 && len(bytes.TrimSpace(out)) > 0 {
-		return decodeKey(out)
-	}
-	if !create {
-		return nil, errors.New("vault key missing from secret service")
 	}
 	k, err := newKey()
 	if err != nil {
@@ -90,7 +130,7 @@ func (s secretToolKey) key(create bool) ([]byte, error) {
 	if _, code, err := s.run([]byte(hex.EncodeToString(k)), "secret-tool", "store", "--label=agentswap vault key", "service", service, "key", "vault"); err != nil || code != 0 {
 		return nil, errUnavailable
 	}
-	return k, nil
+	return k, writeMarker(s.dir, k)
 }
 
 type fileKey struct {
@@ -136,8 +176,8 @@ func machineID() string {
 	return ""
 }
 
-func newDarwin(run execx.Runner) Vault { return newKeyed(keychainKey{run}) }
+func newDarwin(dir string, run execx.Runner) Vault { return newKeyed(keychainKey{run: run, dir: dir}) }
 
 func newLinux(dir string, warn io.Writer, run execx.Runner, id func() string) Vault {
-	return newKeyed(secretToolKey{run}, fileKey{dir: dir, warn: warn, machineID: id})
+	return newKeyed(secretToolKey{run: run, dir: dir}, fileKey{dir: dir, warn: warn, machineID: id})
 }
