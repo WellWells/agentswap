@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue
+    url: https://github.com/WellWells/agentswap/security/advisories/new
+    about: Anything that could expose someone's tokens. Please report it privately instead of opening an issue.
