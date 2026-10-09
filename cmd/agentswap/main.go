@@ -13,9 +13,13 @@ import (
 	"github.com/WellWells/agentswap/internal/cli"
 	"github.com/WellWells/agentswap/internal/links"
 	"github.com/WellWells/agentswap/internal/ui"
+	"github.com/WellWells/agentswap/internal/update"
 )
 
-var version = "dev"
+var (
+	version = "dev"
+	repo    = "WellWells/agentswap"
+)
 
 func main() {
 	home, err := os.UserHomeDir()
@@ -61,6 +65,8 @@ func main() {
 		Output:      output,
 		Stdin:       os.Stdin,
 		Interactive: ui.IsTerminal(os.Stdin),
+		Notify:      ui.IsTerminal(os.Stderr),
+		Releases:    update.Source{Repo: repo},
 	}))
 }
 

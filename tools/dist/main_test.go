@@ -88,7 +88,7 @@ func TestFormula(t *testing.T) {
 		{"linux", "arm64"}:  "la",
 	}
 	var buf bytes.Buffer
-	if err := writeFormula(&buf, "v1.2.3", sums); err != nil {
+	if err := writeFormula(&buf, "WellWells/agentswap", "v1.2.3", sums); err != nil {
 		t.Fatal(err)
 	}
 	got := buf.String()
@@ -108,11 +108,11 @@ func TestFormula(t *testing.T) {
 		t.Errorf("unbalanced blocks:\n%s", got)
 	}
 	for _, v := range []string{"dev", "1.2.3", "vnext"} {
-		if err := writeFormula(io.Discard, v, sums); err == nil {
+		if err := writeFormula(io.Discard, "WellWells/agentswap", v, sums); err == nil {
 			t.Errorf("%q accepted", v)
 		}
 	}
-	if err := writeFormula(io.Discard, "v1.0.0", map[target]string{{"windows", "amd64"}: "w"}); err == nil {
+	if err := writeFormula(io.Discard, "WellWells/agentswap", "v1.0.0", map[target]string{{"windows", "amd64"}: "w"}); err == nil {
 		t.Error("windows-only accepted")
 	}
 }

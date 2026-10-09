@@ -18,6 +18,7 @@ import (
 
 	"github.com/WellWells/agentswap/internal/procs"
 	"github.com/WellWells/agentswap/internal/ui"
+	"github.com/WellWells/agentswap/internal/update"
 	"github.com/WellWells/agentswap/internal/vault"
 )
 
@@ -35,6 +36,10 @@ type harness struct {
 	exe    string
 	exec   func(env []string, name string, args ...string) error
 	output func(env []string, name string, args ...string) ([]byte, error)
+
+	version  string
+	notify   bool
+	releases update.Source
 
 	agy        []byte
 	agyRunning bool
@@ -63,7 +68,7 @@ func (h *harness) Stop(ps []procs.Proc) error {
 
 func newHarness(t *testing.T) *harness {
 	home := t.TempDir()
-	h := &harness{t: t, home: home, codex: filepath.Join(home, ".codex"), usage: map[string]string{}, claude: map[string]string{}, agyUsage: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour).In(time.FixedZone("", 8*3600))}
+	h := &harness{t: t, home: home, version: "test", codex: filepath.Join(home, ".codex"), usage: map[string]string{}, claude: map[string]string{}, agyUsage: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour).In(time.FixedZone("", 8*3600))}
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v1internal:") {
 			body, ok := h.agyUsage[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
@@ -159,7 +164,9 @@ func (h *harness) run(args ...string) (int, string, string) {
 		Now:         func() time.Time { return h.now },
 		Home:        h.home,
 		Exe:         h.exe,
-		Version:     "test",
+		Version:     h.version,
+		Notify:      h.notify,
+		Releases:    h.releases,
 		Lang:        h.lang,
 		Width:       80,
 		Exec:        h.exec,

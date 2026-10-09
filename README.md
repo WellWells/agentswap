@@ -38,6 +38,8 @@ Or download an archive from [Releases](https://github.com/WellWells/agentswap/re
 
 With Go: `go install github.com/WellWells/agentswap/cmd/agentswap@latest`, then run `agentswap link` to create `cxswap` and the other commands next to it.
 
+`agentswap update` installs the latest release in place (Homebrew: `brew upgrade agentswap`). agentswap also checks for a new release at most every 12 hours and prints a one-line notice; set `AGENTSWAP_NO_UPDATE_CHECK=1` to turn that off.
+
 The installers only ship `agentswap` and run `agentswap link`, which adds the per-agent commands as symlinks (hard links on Windows). `agentswap unlink` removes them.
 
 ## Usage

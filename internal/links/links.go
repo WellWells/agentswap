@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 var useSymlink = runtime.GOOS != "windows"
@@ -52,7 +53,7 @@ func Link(exe string, names []string) error {
 			err = os.Link(exe, tmp)
 		}
 		if err == nil {
-			err = os.Rename(tmp, dst)
+			err = rename(tmp, dst)
 		}
 		if err != nil {
 			os.Remove(tmp)
@@ -60,6 +61,25 @@ func Link(exe string, names []string) error {
 		}
 	}
 	return nil
+}
+
+func rename(from, to string) error {
+	for i := 0; ; i++ {
+		err := os.Rename(from, to)
+		if err == nil || i >= 20 {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func Shared(exe, file string, names []string) bool {
+	for _, n := range names {
+		if same(file, path(exe, n)) {
+			return true
+		}
+	}
+	return false
 }
 
 func Target(exe string) (string, bool) {

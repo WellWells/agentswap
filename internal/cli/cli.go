@@ -27,6 +27,7 @@ import (
 	"github.com/WellWells/agentswap/internal/store"
 	"github.com/WellWells/agentswap/internal/swap"
 	"github.com/WellWells/agentswap/internal/ui"
+	"github.com/WellWells/agentswap/internal/update"
 	"github.com/WellWells/agentswap/internal/vault"
 )
 
@@ -52,7 +53,10 @@ type Env struct {
 	Clients *official.Detector
 	Procs   Processes
 
+	Releases update.Source
+
 	Interactive bool
+	Notify      bool
 
 	yes      bool
 	autoLang ui.Lang
@@ -208,6 +212,17 @@ func Run(e Env) int {
 		e.Clients = e.clients()
 		e.Clients.Cache = filepath.Join(e.dir("AGENTSWAP_HOME", ".agentswap"), "clients.json")
 	}
+	if e.goos() == "windows" {
+		e.removeOld()
+	}
+	_, isProvider := lookup(prog)
+	done := e.checkUpdate(!isProvider && len(args) > 0 && isUpdate(args[0]))
+	code := run(e, prog, args)
+	done()
+	return code
+}
+
+func run(e Env, prog string, args []string) int {
 	name, ok := lookup(prog)
 	if !ok {
 		switch {
@@ -223,6 +238,8 @@ func Run(e Env) int {
 			return e.report("agentswap", provider{}, link(e))
 		case args[0] == "unlink":
 			return e.report("agentswap", provider{}, unlink(e))
+		case isUpdate(args[0]):
+			return e.report("agentswap", provider{}, selfUpdate(e))
 		case args[0] == "lang" || args[0] == "language":
 			return e.report("agentswap", provider{}, language(e, args[1:]))
 		}
@@ -300,6 +317,8 @@ func (e Env) report(prog string, p provider, err error) int {
 		msg = l.T("agyRunning")
 	case errors.Is(err, antigravity.ErrUnsupportedLogin):
 		msg = l.T("agyUnsupported")
+	case errors.Is(err, update.ErrChecksum):
+		msg = l.T("updateChecksum")
 	case errors.Is(err, vault.ErrKey):
 		msg = l.T("vaultKey")
 	case errors.Is(err, vault.ErrCorrupt):

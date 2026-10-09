@@ -117,9 +117,7 @@ func writeChecksums(dir string, names []string) error {
 	return os.WriteFile(filepath.Join(dir, "checksums.txt"), []byte(b.String()), 0o644)
 }
 
-const repo = "WellWells/agentswap"
-
-func writeFormula(w io.Writer, version string, sums map[target]string) error {
+func writeFormula(w io.Writer, repo, version string, sums map[target]string) error {
 	plain := strings.TrimPrefix(version, "v")
 	if plain == version || plain == "" || plain[0] < '0' || plain[0] > '9' {
 		return fmt.Errorf("formula needs a release version like v1.0.0, got %q", version)
@@ -165,8 +163,8 @@ func buildTime() time.Time {
 	return time.Now().UTC()
 }
 
-func build(t target, version, outFile string) error {
-	cmd := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w -X main.version="+version, "-o", outFile, "./cmd/agentswap")
+func build(t target, repo, version, outFile string) error {
+	cmd := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w -X main.version="+version+" -X main.repo="+repo, "-o", outFile, "./cmd/agentswap")
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+t.OS, "GOARCH="+t.Arch)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
@@ -177,6 +175,7 @@ func run() error {
 	out := flag.String("out", "dist", "output directory")
 	targetList := flag.String("targets", allTargets, "comma-separated GOOS/GOARCH list")
 	brew := flag.String("brew", "", "also write a Homebrew formula to this path")
+	repo := flag.String("repo", "WellWells/agentswap", "GitHub repository that publishes the releases")
 	flag.Parse()
 
 	if _, err := os.Stat("go.mod"); err != nil {
@@ -210,7 +209,7 @@ func run() error {
 			binName += ".exe"
 		}
 		binPath := filepath.Join(tmp, t.OS+"_"+t.Arch, binName)
-		if err := build(t, *version, binPath); err != nil {
+		if err := build(t, *repo, *version, binPath); err != nil {
 			return fmt.Errorf("build %s/%s: %w", t.OS, t.Arch, err)
 		}
 		bin, err := os.ReadFile(binPath)
@@ -257,7 +256,7 @@ func run() error {
 		return nil
 	}
 	var rb strings.Builder
-	if err := writeFormula(&rb, *version, sums); err != nil {
+	if err := writeFormula(&rb, *repo, *version, sums); err != nil {
 		return err
 	}
 	return os.WriteFile(*brew, []byte(rb.String()), 0o644)
