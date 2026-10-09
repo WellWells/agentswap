@@ -817,10 +817,13 @@ func TestClaudeImportMenuChoosesCswap(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errs)
 	}
-	for _, want := range []string{"1) cswap", "Imported home <a@x>", "Imported work <b@x>", "k@token.local", "cswap purge"} {
+	for _, want := range []string{"1) cswap", "Imported home <a@x>", "Imported work <b@x>", "k@token.local", "run `cswap purge` to remove the copies claude-swap kept in " + filepath.Join(h.home, ".local", "share", "claude-swap") + "."} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "base64") || strings.Contains(out, "encrypted") {
+		t.Fatalf("message should not judge claude-swap:\n%s", out)
 	}
 	creds, _ := os.ReadFile(filepath.Join(h.home, ".claude", ".credentials.json"))
 	if !strings.Contains(string(creds), "fresh") {
