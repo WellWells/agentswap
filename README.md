@@ -44,7 +44,7 @@ The installers only ship `agentswap` and run `agentswap link`, which adds the pe
 
 ## Usage
 
-Run any command without arguments for its help. `agentswap status` shows the usage of every saved account of every agent.
+Run any command without arguments for its help. `agentswap status` shows the usage of every saved account of every agent; `usage` is the same as `status` everywhere.
 
 ```sh
 codex login            # log in to the first account

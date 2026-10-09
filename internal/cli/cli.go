@@ -232,7 +232,7 @@ func run(e Env, prog string, args []string) int {
 		case isVersion(args[0]):
 			printVersion(e)
 			return 0
-		case args[0] == "status" || args[0] == "current":
+		case args[0] == "status" || args[0] == "current" || args[0] == "usage":
 			return e.report("agentswap", provider{}, overview(e))
 		case args[0] == "link":
 			return e.report("agentswap", provider{}, link(e))
@@ -352,7 +352,7 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		return nil
 	case cmd == "list" || cmd == "ls":
 		return list(e, prog, p, m)
-	case cmd == "status" || cmd == "current":
+	case cmd == "status" || cmd == "current" || cmd == "usage":
 		q := ""
 		if len(args) > 0 {
 			q = args[0]

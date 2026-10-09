@@ -904,6 +904,28 @@ func TestStatusShowsOneAccount(t *testing.T) {
 	}
 }
 
+func TestUsageIsStatus(t *testing.T) {
+	h := newHarness(t)
+	setupTwo(t, h)
+	for _, c := range [][2][]string{
+		{{"cxswap", "status"}, {"cxswap", "usage"}},
+		{{"cxswap", "status", "bob"}, {"cxswap", "usage", "bob"}},
+		{{"agentswap", "codex", "status"}, {"agentswap", "codex", "usage"}},
+		{{"agentswap", "status"}, {"agentswap", "usage"}},
+	} {
+		code, want, _ := h.run(c[0]...)
+		got, out, errs := h.run(c[1]...)
+		if code != 0 || got != code || out != want {
+			t.Fatalf("%v: %d %d %q\nwant:\n%s\ngot:\n%s", c[1], code, got, errs, want, out)
+		}
+	}
+	for _, c := range [][]string{{"cxswap", "  cxswap usage [account]"}, {"ccswap", "  ccswap usage [account]"}, {"agswap", "  agswap usage [account]"}, {"agentswap", "  agentswap usage "}} {
+		if _, out, _ := h.run(c[0], "help"); !strings.Contains(out, c[1]) {
+			t.Fatalf("%s help:\n%s", c[0], out)
+		}
+	}
+}
+
 func TestHelpIsSpecificToEachCommand(t *testing.T) {
 	h := newHarness(t)
 	cases := []struct {
