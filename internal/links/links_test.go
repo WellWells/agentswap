@@ -112,3 +112,31 @@ func TestUnlinkRemovesOnlyOwnLinks(t *testing.T) {
 		t.Fatalf("exe removed: %v", err)
 	}
 }
+
+func TestTargetForwardsLinkedName(t *testing.T) {
+	exe, ext := fakeExe(t)
+	if err := Link(exe, []string{"cxswap"}); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(filepath.Dir(exe), "cxswap"+ext)
+	if got, ok := Target(alias); !ok || got != exe {
+		t.Fatalf("Target(%q) = %q, %v", alias, got, ok)
+	}
+	if got, ok := Target(exe); ok {
+		t.Fatalf("Target(exe) = %q, want no forward", got)
+	}
+}
+
+func TestTargetIgnoresUnrelatedFile(t *testing.T) {
+	exe, ext := fakeExe(t)
+	copied := filepath.Join(filepath.Dir(exe), "cxswap"+ext)
+	os.WriteFile(copied, []byte("v1"), 0o755)
+	if got, ok := Target(copied); ok {
+		t.Fatalf("Target(copy) = %q, want no forward", got)
+	}
+	lone := filepath.Join(t.TempDir(), "cxswap"+ext)
+	os.WriteFile(lone, []byte("v1"), 0o755)
+	if got, ok := Target(lone); ok {
+		t.Fatalf("Target(lone) = %q, want no forward", got)
+	}
+}

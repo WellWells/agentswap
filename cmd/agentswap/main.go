@@ -1,13 +1,17 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"github.com/WellWells/agentswap/internal/cli"
+	"github.com/WellWells/agentswap/internal/links"
 	"github.com/WellWells/agentswap/internal/ui"
 )
 
@@ -25,6 +29,11 @@ func main() {
 	}
 	if err != nil {
 		exe = ""
+	}
+	if runtime.GOOS == "windows" && exe != "" {
+		if code, ok := forward(exe); ok {
+			os.Exit(code)
+		}
 	}
 	color, width := ui.Terminal(os.Stdout)
 	if os.Getenv("NO_COLOR") != "" {
@@ -53,6 +62,29 @@ func main() {
 		Stdin:       os.Stdin,
 		Interactive: ui.IsTerminal(os.Stdin),
 	}))
+}
+
+func forward(exe string) (int, bool) {
+	target, ok := links.Target(exe)
+	if !ok {
+		return 0, false
+	}
+	cmd := exec.Command(target, os.Args[1:]...)
+	cmd.Args[0] = os.Args[0]
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Start(); err != nil {
+		return 0, false
+	}
+	signal.Notify(make(chan os.Signal, 1), os.Interrupt)
+	if err := cmd.Wait(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode(), true
+		}
+		fmt.Fprintln(os.Stderr, "agentswap:", err)
+		return 1, true
+	}
+	return 0, true
 }
 
 func run(env []string, name string, args ...string) error {

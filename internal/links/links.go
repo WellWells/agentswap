@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 var useSymlink = runtime.GOOS != "windows"
@@ -59,6 +60,14 @@ func Link(exe string, names []string) error {
 		}
 	}
 	return nil
+}
+
+func Target(exe string) (string, bool) {
+	dst := path(exe, "agentswap")
+	if strings.EqualFold(filepath.Clean(dst), filepath.Clean(exe)) || !same(exe, dst) {
+		return "", false
+	}
+	return dst, true
 }
 
 func Unlink(exe string, names []string) ([]string, error) {
