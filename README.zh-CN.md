@@ -4,13 +4,13 @@
 
 [![ci](https://github.com/WellWells/agentswap/actions/workflows/ci.yml/badge.svg)](https://github.com/WellWells/agentswap/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/WellWells/agentswap)](https://github.com/WellWells/agentswap/releases/latest)
-[![license](https://img.shields.io/github/license/WellWells/agentswap)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 快速、轻巧、隐私优先的账号切换工具，支持 Codex、Claude Code 和 Antigravity CLI。
 
 有好几个订阅时，把登录文件复制来复制去撑不了几天：保存的那份很快就过期，重新登录又会把原来在用的账号登出。agentswap 让每个已保存的账号都保持登录，显示每个账号的额度还剩多少，一条命令切换。只换登录，agent 的其他配置都不动。token 只留在你的电脑上，加密保存。
 
-![agentswap status：Codex、Claude Code、Antigravity 每个已保存账号的 5 小时与每周额度](docs/status.zh-CN.png)
+![agentswap status：Codex、Claude Code、Antigravity 每个已保存账号的 5 小时与每周额度](docs/agentswap-status.zh-CN.png)
 
 一个小程序，支持 macOS、Linux、Windows。不用另外安装任何东西，也不常驻后台。
 

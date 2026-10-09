@@ -4,13 +4,13 @@ English | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md)
 
 [![ci](https://github.com/WellWells/agentswap/actions/workflows/ci.yml/badge.svg)](https://github.com/WellWells/agentswap/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/WellWells/agentswap)](https://github.com/WellWells/agentswap/releases/latest)
-[![license](https://img.shields.io/github/license/WellWells/agentswap)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A fast, compact, privacy-first account switcher for Codex, Claude Code and the Antigravity CLI.
 
 With more than one subscription, copying the login file back and forth only lasts a few days: the saved copy expires, and signing in again logs out the account you were using. agentswap keeps every saved account signed in, shows how much of each account's limits is left, and switches with one command. Only the login changes; the rest of your agent's settings stay as they are. Your tokens stay on your machine, encrypted.
 
-![agentswap status: 5-hour and weekly limits of every saved Codex, Claude Code and Antigravity account](docs/status.png)
+![agentswap status: 5-hour and weekly limits of every saved Codex, Claude Code and Antigravity account](docs/agentswap-status.png)
 
 One small program for macOS, Linux and Windows. Nothing else to install, nothing running in the background.
 
