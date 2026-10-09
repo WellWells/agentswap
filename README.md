@@ -10,11 +10,11 @@ A fast, compact, privacy-first account switcher for Codex, Claude Code and the A
 
 With more than one subscription, copying the login file back and forth only lasts a few days: the saved copy expires, and signing in again logs out the account you were using. agentswap keeps every saved account signed in, shows how much of each account's limits is left, and switches with one command. Only the login changes; the rest of your agent's settings stay as they are. Your tokens stay on your machine, encrypted.
 
-![cxswap status: 5-hour and weekly limits of every saved Codex account](docs/status.png)
+![agentswap status: 5-hour and weekly limits of every saved Codex, Claude Code and Antigravity account](docs/status.png)
 
 One small program for macOS, Linux and Windows. Nothing else to install, nothing running in the background.
 
-agentswap was inspired by [claude-swap](https://github.com/realiti4/claude-swap) (`cswap`). It brings the same idea to Codex and the Antigravity CLI, keeps every saved account encrypted so only your user on this computer can open it, and comes as one program with nothing else to install. If you are moving over, `ccswap import` brings your accounts with you.
+agentswap was inspired by claude-swap (`cswap`). It brings the same idea to Codex and the Antigravity CLI, keeps every saved account encrypted so only your user on this computer can open it, and comes as one program with nothing else to install. If you are moving over, `ccswap import` brings your accounts with you.
 
 ## Install
 

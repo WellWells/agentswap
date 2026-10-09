@@ -10,11 +10,11 @@
 
 有好幾個訂閱時，把登入檔複製來複製去撐不了幾天：存起來的那份很快就過期，重新登入又會把原本在用的帳號登出。agentswap 讓每個已存帳號都維持登入，顯示每個帳號的額度還剩多少，一行指令切換。只換登入，agent 的其他設定都不動。token 只留在你的電腦上，加密保存。
 
-![cxswap status：每個已存 Codex 帳號的 5 小時與每週額度](docs/status.zh-TW.png)
+![agentswap status：Codex、Claude Code、Antigravity 每個已存帳號的 5 小時與每週額度](docs/status.zh-TW.png)
 
 一個小程式，支援 macOS、Linux、Windows。不用另外安裝任何東西，也不常駐背景。
 
-agentswap 的靈感來自 [claude-swap](https://github.com/realiti4/claude-swap)（`cswap`），把同樣的做法延伸到 Codex 與 Antigravity CLI。每個已存帳號都加密保存，只有這台電腦的你能打開；整個工具就是一個程式，不需要另外安裝其他東西。如果你要搬過來，`ccswap import` 可以把帳號一起帶過來。
+agentswap 的靈感來自 claude-swap（`cswap`），把同樣的做法延伸到 Codex 與 Antigravity CLI。每個已存帳號都加密保存，只有這台電腦的你能打開；整個工具就是一個程式，不需要另外安裝其他東西。如果你要搬過來，`ccswap import` 可以把帳號一起帶過來。
 
 ## 安裝
 
