@@ -149,6 +149,11 @@ func TestZoneFromTZ(t *testing.T) {
 	if got := DetectZone(env(map[string]string{"TZ": ":Asia/Taipei"})); got != "Asia/Taipei" {
 		t.Fatalf("got %q", got)
 	}
+	for _, tz := range []string{"UTC", "EST5EDT"} {
+		if got := DetectZone(env(map[string]string{"TZ": tz})); got != "" {
+			t.Fatalf("%s: got %q", tz, got)
+		}
+	}
 }
 
 func TestBar(t *testing.T) {

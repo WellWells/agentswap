@@ -14,6 +14,9 @@ func DetectZone(getenv func(string) string) string {
 	if strings.Contains(tz, "/") {
 		return tz
 	}
+	if tz != "" {
+		return ""
+	}
 	return systemZone()
 }
 
