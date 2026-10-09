@@ -11,14 +11,14 @@ import (
 )
 
 func list(run execx.Runner) ([]Proc, error) {
-	out, code, err := run(nil, "ps", "-axo", "pid=,ppid=,comm=")
+	out, code, err := run(nil, "ps", "-axo", "pid=,ppid=,uid=,comm=")
 	if err != nil {
 		return nil, err
 	}
 	if code != 0 {
 		return nil, fmt.Errorf("ps: exit %d", code)
 	}
-	ps := parsePS(string(out))
+	ps := parsePS(string(out), os.Getuid())
 	for i := range ps {
 		if ps[i].Path == "" {
 			if p, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", ps[i].PID)); err == nil {

@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,6 +36,43 @@ func TestFilterSkipsSelfAncestorsAndPaths(t *testing.T) {
 	}
 }
 
+func TestFilterSkipsOtherUsers(t *testing.T) {
+	all := []Proc{
+		{PID: 5, PPID: 1, Name: "agy", Other: true},
+		{PID: 6, PPID: 1, Name: "agy"},
+		{PID: 7, PPID: 8, Name: "claude", Other: true},
+		{PID: 8, PPID: 9, Name: "ccswap"},
+	}
+	if got := Filter(all, []string{"agy", "claude"}, nil, 8); len(got) != 1 || got[0].PID != 6 {
+		t.Fatalf("%v", pids(got))
+	}
+}
+
+func TestListMarksOtherUsers(t *testing.T) {
+	all, err := list(System{}.runner())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var self, system *Proc
+	for i, p := range all {
+		if p.PID == os.Getpid() {
+			self = &all[i]
+		}
+		if (runtime.GOOS == "windows" && strings.EqualFold(p.Name, "lsass.exe")) || (runtime.GOOS != "windows" && p.PID == 1) {
+			system = &all[i]
+		}
+	}
+	if self == nil || self.Other {
+		t.Fatalf("own process: %+v", self)
+	}
+	if runtime.GOOS != "windows" && os.Getuid() == 0 {
+		return
+	}
+	if system == nil || !system.Other {
+		t.Fatalf("system process: %+v", system)
+	}
+}
+
 func TestFilterHandlesParentLoops(t *testing.T) {
 	all := []Proc{{PID: 5, PPID: 6, Name: "agy"}, {PID: 6, PPID: 5, Name: "x"}, {PID: 7, PPID: 1, Name: "agy"}}
 	if got := Filter(all, []string{"agy"}, nil, 6); len(got) != 1 || got[0].PID != 7 {
@@ -43,8 +81,8 @@ func TestFilterHandlesParentLoops(t *testing.T) {
 }
 
 func TestParsePS(t *testing.T) {
-	ps := parsePS("  101     1 /Applications/Codex App.app/Contents/MacOS/Codex\n  202   101 agy\nbad line\n")
-	if len(ps) != 2 || ps[0].Name != "Codex" || ps[0].Path != "/Applications/Codex App.app/Contents/MacOS/Codex" || ps[1].PID != 202 || ps[1].PPID != 101 || ps[1].Name != "agy" || ps[1].Path != "" {
+	ps := parsePS("  101     1   501 /Applications/Codex App.app/Contents/MacOS/Codex\n  202   101   502 agy\nbad line\n  303 1 x\n", 501)
+	if len(ps) != 2 || ps[0].Name != "Codex" || ps[0].Path != "/Applications/Codex App.app/Contents/MacOS/Codex" || ps[0].Other || ps[1].PID != 202 || ps[1].PPID != 101 || ps[1].Name != "agy" || ps[1].Path != "" || !ps[1].Other {
 		t.Fatalf("%+v", ps)
 	}
 }

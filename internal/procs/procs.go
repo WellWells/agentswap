@@ -12,10 +12,11 @@ import (
 )
 
 type Proc struct {
-	PID  int
-	PPID int
-	Name string
-	Path string
+	PID   int
+	PPID  int
+	Name  string
+	Path  string
+	Other bool
 }
 
 type System struct {
@@ -44,7 +45,7 @@ func Filter(all []Proc, names, skipPaths []string, self int) []Proc {
 	}
 	var out []Proc
 	for _, p := range all {
-		if mine[p.PID] || !wanted(p, names, skipPaths) {
+		if mine[p.PID] || p.Other || !wanted(p, names, skipPaths) {
 			continue
 		}
 		out = append(out, p)
@@ -137,20 +138,21 @@ func (s System) Stop(ps []Proc) error {
 	return nil
 }
 
-func parsePS(out string) []Proc {
+func parsePS(out string, uid int) []Proc {
 	var ps []Proc
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) < 3 {
+		if len(f) < 4 {
 			continue
 		}
 		pid, err1 := strconv.Atoi(f[0])
 		ppid, err2 := strconv.Atoi(f[1])
-		if err1 != nil || err2 != nil {
+		owner, err3 := strconv.Atoi(f[2])
+		if err1 != nil || err2 != nil || err3 != nil {
 			continue
 		}
-		comm := strings.Join(f[2:], " ")
-		p := Proc{PID: pid, PPID: ppid, Name: filepath.Base(comm)}
+		comm := strings.Join(f[3:], " ")
+		p := Proc{PID: pid, PPID: ppid, Name: filepath.Base(comm), Other: owner != uid}
 		if strings.HasPrefix(comm, "/") {
 			p.Path = comm
 		}

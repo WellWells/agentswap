@@ -153,7 +153,7 @@ func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, er
 	if p.UserAgent != nil {
 		req.Header.Set("User-Agent", p.UserAgent())
 	}
-	resp, err := p.client().Do(req)
+	resp, err := swap.SameOrigin(p.client()).Do(req)
 	if err != nil {
 		return swap.Usage{}, err
 	}

@@ -89,12 +89,15 @@ func (p Provider) client() *http.Client {
 	return http.DefaultClient
 }
 
-func (p Provider) baseURL() string {
+func (p Provider) baseURL(active bool) string {
 	if p.BaseURL != "" {
 		return p.BaseURL
 	}
+	if !active {
+		return DefaultBaseURL
+	}
 	if b, err := os.ReadFile(filepath.Join(p.Home, "config.toml")); err == nil {
-		if v, err := topLevel(b, "chatgpt_base_url"); err == nil && v != "" {
+		if v, err := topLevel(b, "chatgpt_base_url"); err == nil && swap.SecureURL(v) {
 			return v
 		}
 	}
@@ -117,6 +120,7 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 	if err != nil {
 		return swap.Usage{}, nil, err
 	}
+	base := p.baseURL(active)
 	var refreshed []byte
 	renew := func() error {
 		b, err := p.refreshTokens(ctx, snap, c.refresh)
@@ -132,13 +136,13 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 			return swap.Usage{}, nil, err
 		}
 	}
-	u, err := p.fetchWithRetry(ctx, c)
+	u, err := p.fetchWithRetry(ctx, c, base)
 	var he httpError
 	if errors.As(err, &he) && he == http.StatusUnauthorized && !active && refreshed == nil && c.refresh != "" {
 		if rerr := renew(); rerr != nil {
 			return swap.Usage{}, nil, rerr
 		}
-		u, err = p.fetchWithRetry(ctx, c)
+		u, err = p.fetchWithRetry(ctx, c, base)
 	}
 	if errors.As(err, &he) && he == http.StatusUnauthorized {
 		return swap.Usage{}, refreshed, ErrLoginExpired
@@ -152,8 +156,8 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 	return u, refreshed, nil
 }
 
-func (p Provider) fetchWithRetry(ctx context.Context, c creds) (swap.Usage, error) {
-	u, err := p.fetchUsage(ctx, c)
+func (p Provider) fetchWithRetry(ctx context.Context, c creds, base string) (swap.Usage, error) {
+	u, err := p.fetchUsage(ctx, c, base)
 	if !transient(err) {
 		return u, err
 	}
@@ -162,7 +166,7 @@ func (p Provider) fetchWithRetry(ctx context.Context, c creds) (swap.Usage, erro
 		return u, err
 	case <-time.After(300 * time.Millisecond):
 	}
-	return p.fetchUsage(ctx, c)
+	return p.fetchUsage(ctx, c, base)
 }
 
 func transient(err error) bool {
@@ -201,8 +205,8 @@ func (w *apiWindow) window() swap.Window {
 	return out
 }
 
-func (p Provider) fetchUsage(ctx context.Context, c creds) (swap.Usage, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, usageURL(p.baseURL()), nil)
+func (p Provider) fetchUsage(ctx context.Context, c creds, base string) (swap.Usage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, usageURL(base), nil)
 	if err != nil {
 		return swap.Usage{}, err
 	}
@@ -211,7 +215,7 @@ func (p Provider) fetchUsage(ctx context.Context, c creds) (swap.Usage, error) {
 	if c.account != "" {
 		req.Header.Set("ChatGPT-Account-ID", c.account)
 	}
-	resp, err := p.client().Do(req)
+	resp, err := swap.SameOrigin(p.client()).Do(req)
 	if err != nil {
 		return swap.Usage{}, err
 	}

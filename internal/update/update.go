@@ -113,8 +113,9 @@ func parse(v string) (version, bool) {
 	if !ok {
 		return out, false
 	}
-	if i := strings.IndexByte(s, '+'); i >= 0 {
-		s = s[:i]
+	s, build, hasBuild := strings.Cut(s, "+")
+	if hasBuild && !idents(build) {
+		return out, false
 	}
 	core, pre, hasPre := strings.Cut(s, "-")
 	parts := strings.Split(core, ".")
@@ -129,14 +130,26 @@ func parse(v string) (version, bool) {
 		out.core[i] = n
 	}
 	if hasPre {
+		if !idents(pre) {
+			return out, false
+		}
 		out.pre = strings.Split(pre, ".")
-		for _, id := range out.pre {
-			if id == "" {
-				return out, false
+	}
+	return out, true
+}
+
+func idents(s string) bool {
+	for _, id := range strings.Split(s, ".") {
+		if id == "" {
+			return false
+		}
+		for _, c := range id {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '-') {
+				return false
 			}
 		}
 	}
-	return out, true
+	return true
 }
 
 func Valid(v string) bool {

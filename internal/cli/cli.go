@@ -53,13 +53,20 @@ type Env struct {
 	Clients *official.Detector
 	Procs   Processes
 
-	Releases update.Source
+	Releases  update.Source
+	Endpoints Endpoints
 
 	Interactive bool
 	Notify      bool
 
 	yes      bool
 	autoLang ui.Lang
+}
+
+type Endpoints struct {
+	CodexAPI, CodexToken   string
+	ClaudeAPI, ClaudeToken string
+	AgyAPI, AgyToken       string
 }
 
 type Processes interface {
@@ -138,17 +145,20 @@ var providers = map[string]provider{
 	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", loginCmd: []string{"codex", "login"}, homeEnv: "CODEX_HOME", homeDir: ".codex", homeCopy: []string{"config.toml"}, daemon: []string{"codex", "app-server", "daemon"}, hint: "hintCodex", usage: "usage", empty: "emptyProvider", addMore: "listAddMore", procNames: []string{"codex"}, open: func(e Env) swap.Provider {
 		return codex.Provider{
 			Home:       e.dir("CODEX_HOME", ".codex"),
-			RefreshURL: e.Getenv("CODEX_REFRESH_TOKEN_URL_OVERRIDE"),
+			BaseURL:    e.Endpoints.CodexAPI,
+			RefreshURL: e.Endpoints.CodexToken,
 			UserAgent:  e.clients().Codex,
 		}
 	}},
 	"claude": {name: "claude", display: "Claude Code", supported: true, login: "claude auth login", official: "loginOfficial", hint: "hintClaude", usage: "usageClaude", empty: "emptyClaude", addMore: "listAddMoreClaude", procNames: []string{"claude"}, procSkip: []string{"AnthropicClaude", "Claude.app/Contents/MacOS/Claude"}, open: func(e Env) swap.Provider {
 		p := claude.New(e.Getenv, e.Home, e.goos(), e.Run)
+		p.BaseURL, p.RefreshURL = e.Endpoints.ClaudeAPI, e.Endpoints.ClaudeToken
 		p.UserAgent = e.clients().Claude
 		return p
 	}},
 	"antigravity": {name: "antigravity", display: "Antigravity", supported: true, login: "agy", official: "loginAgy", hint: "hintAntigravity", usage: "usageAntigravity", empty: "emptyAntigravity", addMore: "listAddMoreAntigravity", procNames: []string{"agy"}, mustStop: true, open: func(e Env) swap.Provider {
-		p := antigravity.New(e.Getenv, e.goos(), e.Run)
+		p := antigravity.New(e.goos(), e.Run)
+		p.BaseURL, p.RefreshURL = e.Endpoints.AgyAPI, e.Endpoints.AgyToken
 		p.UserAgent = e.clients().Agy
 		return p
 	}},
@@ -505,7 +515,7 @@ func stopRunning(e Env, prog string, p provider, m *swap.Manager, q string) erro
 		if where == "" {
 			where = f.Name
 		}
-		fmt.Fprintf(e.Stdout, "  PID %-7d %s\n", f.PID, where)
+		fmt.Fprintf(e.Stdout, "  PID %-7d %s\n", f.PID, ui.Clean(where))
 	}
 	yes := e.yes
 	if !yes && e.Interactive && e.Stdin != nil {

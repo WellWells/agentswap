@@ -43,8 +43,6 @@ func New(getenv func(string) string, home, goos string, run execx.Runner) Provid
 	p := Provider{
 		ConfigDir:    filepath.Join(home, ".claude"),
 		GlobalConfig: filepath.Join(home, ".claude.json"),
-		BaseURL:      getenv("AGENTSWAP_CLAUDE_API_URL"),
-		RefreshURL:   getenv("AGENTSWAP_CLAUDE_TOKEN_URL"),
 	}
 	if dir := getenv("CLAUDE_CONFIG_DIR"); dir != "" {
 		p.ConfigDir, p.GlobalConfig = dir, filepath.Join(dir, ".claude.json")

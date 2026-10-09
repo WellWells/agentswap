@@ -137,7 +137,7 @@ func (p Provider) call(ctx context.Context, ua, access, method string, body, out
 	req.Header.Set("Authorization", "Bearer "+access)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", ua)
-	resp, err := p.client().Do(req)
+	resp, err := swap.SameOrigin(p.client()).Do(req)
 	if err != nil {
 		return err
 	}

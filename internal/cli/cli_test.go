@@ -146,17 +146,14 @@ func (h *harness) run(args ...string) (int, string, string) {
 		Args:   args,
 		Stdout: &out,
 		Stderr: &errb,
-		Getenv: func(k string) string {
-			if v, ok := h.env[k]; ok {
-				return v
-			}
-			return map[string]string{
-				"CODEX_REFRESH_TOKEN_URL_OVERRIDE": h.srv.URL + "/oauth/token",
-				"AGENTSWAP_CLAUDE_API_URL":         h.srv.URL,
-				"AGENTSWAP_CLAUDE_TOKEN_URL":       h.srv.URL + "/v1/oauth/token",
-				"AGENTSWAP_ANTIGRAVITY_API_URL":    h.srv.URL,
-				"AGENTSWAP_ANTIGRAVITY_TOKEN_URL":  h.srv.URL + "/agy/token",
-			}[k]
+		Getenv: func(k string) string { return h.env[k] },
+		Endpoints: Endpoints{
+			CodexAPI:    h.srv.URL + "/backend-api",
+			CodexToken:  h.srv.URL + "/oauth/token",
+			ClaudeAPI:   h.srv.URL,
+			ClaudeToken: h.srv.URL + "/v1/oauth/token",
+			AgyAPI:      h.srv.URL,
+			AgyToken:    h.srv.URL + "/agy/token",
 		},
 		Run:         h.runCmd,
 		Procs:       h,
@@ -1133,18 +1130,19 @@ func twoAgy(h *harness) {
 func TestSwitchAsksBeforeStoppingAgy(t *testing.T) {
 	h := newHarness(t)
 	twoAgy(h)
-	h.procs = []procs.Proc{{PID: 7, PPID: 1, Name: "agy.exe", Path: `C:\agy\agy.exe`}, {PID: 8, PPID: 1, Name: "notepad.exe"}}
+	h.procs = []procs.Proc{{PID: 7, PPID: 1, Name: "agy.exe", Path: `C:\agy\agy.exe`}, {PID: 8, PPID: 1, Name: "notepad.exe"}, {PID: 9, PPID: 1, Name: "agy", Path: "/tmp/\x1b[2Kagy"}, {PID: 10, PPID: 1, Name: "agy", Other: true}}
 	h.agyRunning = true
 	h.interactive = true
 	before := append([]byte(nil), h.agy...)
 	h.stdin = "n\n"
 	code, out, errs := h.run("agswap", "1")
-	if code != 1 || !strings.Contains(out, `PID 7       C:\agy\agy.exe`) || !strings.Contains(out, "[y/N]") || !strings.Contains(errs, "switch cancelled") || !strings.Contains(errs, "`agswap 1 --yes`") {
+	if code != 1 || !strings.Contains(out, `PID 7       C:\agy\agy.exe`) || !strings.Contains(out, "PID 9       /tmp/?[2Kagy") || strings.Contains(out, "\x1b") || strings.Contains(out, "PID 10") || !strings.Contains(out, "[y/N]") || !strings.Contains(errs, "switch cancelled") || !strings.Contains(errs, "`agswap 1 --yes`") {
 		t.Fatalf("declined: %d %q %q", code, out, errs)
 	}
 	if len(h.stopped) != 0 || !bytes.Equal(h.agy, before) {
 		t.Fatalf("changed after decline: %v", h.stopped)
 	}
+	h.procs = h.procs[:2]
 	h.stdin = "y\n"
 	code, out, errs = h.run("agswap", "1")
 	if code != 0 || !strings.Contains(out, "Ended 1 process") || !strings.Contains(out, "Switched to a@gmail.com") {

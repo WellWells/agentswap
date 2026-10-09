@@ -67,6 +67,7 @@ func main() {
 		Interactive: ui.IsTerminal(os.Stdin),
 		Notify:      ui.IsTerminal(os.Stderr),
 		Releases:    update.Source{Repo: repo},
+		Endpoints:   endpoints(),
 	}))
 }
 

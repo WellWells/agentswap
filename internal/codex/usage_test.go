@@ -112,12 +112,45 @@ func TestBackendUsageURL(t *testing.T) {
 
 func TestBaseURLComesFromConfig(t *testing.T) {
 	p := Provider{Home: t.TempDir()}
-	if got := p.baseURL(); got != DefaultBaseURL {
+	if got := p.baseURL(true); got != DefaultBaseURL {
 		t.Fatalf("default: %s", got)
 	}
-	os.WriteFile(filepath.Join(p.Home, "config.toml"), []byte("chatgpt_base_url = \"http://proxy.local/backend-api\"\n"), 0o600)
-	if got := p.baseURL(); got != "http://proxy.local/backend-api" {
-		t.Fatalf("config: %s", got)
+	for base, want := range map[string]string{
+		"https://proxy.example/backend-api": "https://proxy.example/backend-api",
+		"http://127.0.0.1:8080/backend-api": "http://127.0.0.1:8080/backend-api",
+		"http://localhost/backend-api":      "http://localhost/backend-api",
+		"http://[::1]:9/backend-api":        "http://[::1]:9/backend-api",
+		"http://proxy.local/backend-api":    DefaultBaseURL,
+		"ftp://proxy.example/backend-api":   DefaultBaseURL,
+		"proxy.example/backend-api":         DefaultBaseURL,
+	} {
+		os.WriteFile(filepath.Join(p.Home, "config.toml"), []byte("chatgpt_base_url = \""+base+"\"\n"), 0o600)
+		if got := p.baseURL(true); got != want {
+			t.Fatalf("active %s: got %s, want %s", base, got, want)
+		}
+		if got := p.baseURL(false); got != DefaultBaseURL {
+			t.Fatalf("inactive %s: got %s", base, got)
+		}
+	}
+}
+
+type hostRecorder struct{ hosts []string }
+
+func (h *hostRecorder) RoundTrip(r *http.Request) (*http.Response, error) {
+	h.hosts = append(h.hosts, r.URL.Host)
+	return nil, errors.New("offline")
+}
+
+func TestOnlyActiveAccountUsesConfigBaseURL(t *testing.T) {
+	rec := &hostRecorder{}
+	p := Provider{Home: t.TempDir(), Client: &http.Client{Transport: rec}}
+	os.WriteFile(filepath.Join(p.Home, "config.toml"), []byte("chatgpt_base_url = \"https://proxy.example/backend-api\"\n"), 0o600)
+	snap := []byte(`{"tokens":{"access_token":"at","id_token":"e30.e30.x","account_id":"a"}}`)
+	p.Usage(context.Background(), snap, false)
+	p.Usage(context.Background(), snap, true)
+	want := []string{"chatgpt.com", "chatgpt.com", "proxy.example", "proxy.example"}
+	if fmt.Sprint(rec.hosts) != fmt.Sprint(want) {
+		t.Fatalf("hosts %v, want %v", rec.hosts, want)
 	}
 }
 

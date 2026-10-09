@@ -38,8 +38,8 @@ type Provider struct {
 	Now        func() time.Time
 }
 
-func New(getenv func(string) string, goos string, run execx.Runner) Provider {
-	p := Provider{BaseURL: getenv("AGENTSWAP_ANTIGRAVITY_API_URL"), RefreshURL: getenv("AGENTSWAP_ANTIGRAVITY_TOKEN_URL")}
+func New(goos string, run execx.Runner) Provider {
+	var p Provider
 	switch goos {
 	case "windows":
 		p.Keyring = winCred{target: service + ":" + user}

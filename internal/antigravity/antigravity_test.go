@@ -227,17 +227,14 @@ func TestPgrep(t *testing.T) {
 }
 
 func TestNewPicksKeyring(t *testing.T) {
-	env := func(k string) string {
-		return map[string]string{"AGENTSWAP_ANTIGRAVITY_API_URL": "http://api", "AGENTSWAP_ANTIGRAVITY_TOKEN_URL": "http://tok"}[k]
-	}
-	if _, ok := New(env, "windows", nil).Keyring.(winCred); !ok {
+	if _, ok := New("windows", nil).Keyring.(winCred); !ok {
 		t.Fatal("windows")
 	}
-	if _, ok := New(env, "darwin", nil).Keyring.(keychain); !ok {
+	if _, ok := New("darwin", nil).Keyring.(keychain); !ok {
 		t.Fatal("darwin")
 	}
-	p := New(env, "linux", nil)
-	if _, ok := p.Keyring.(secretTool); !ok || p.BaseURL != "http://api" || p.RefreshURL != "http://tok" || p.Running == nil {
+	p := New("linux", nil)
+	if _, ok := p.Keyring.(secretTool); !ok || p.BaseURL != "" || p.RefreshURL != "" || p.Running == nil {
 		t.Fatalf("%+v", p)
 	}
 }
