@@ -44,13 +44,48 @@ With Go: `go install github.com/WellWells/agentswap/cmd/agentswap@latest`, then 
 
 ## Uninstall
 
+Removing agentswap does not sign you out of any agent; the account in use stays signed in.
+
+**macOS / Linux**, installed with the script:
+
 ```sh
 agentswap unlink                  # remove cxswap, ccswap and the other commands
-rm ~/.local/bin/agentswap         # or: brew uninstall agentswap
-rm -rf ~/.agentswap               # saved accounts
+rm ~/.local/bin/agentswap
 ```
 
-On Windows, delete `%LOCALAPPDATA%\agentswap` and remove its `bin` folder from your user PATH. On macOS and Linux the encryption key stays in the keychain under the name `agentswap`; delete it there if you want nothing left behind.
+**Homebrew**:
+
+```sh
+brew uninstall agentswap
+```
+
+**Windows**, in PowerShell. This deletes the program folder, which also holds `cxswap`, `ccswap` and the other commands, and removes it from your user PATH:
+
+```powershell
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\agentswap"
+$key = Get-Item HKCU:\Environment
+$path = ($key.GetValue('Path', '', 'DoNotExpandEnvironmentNames') -split ';' | Where-Object { $_ -and $_ -ne "$env:LOCALAPPDATA\agentswap\bin" }) -join ';'
+Set-ItemProperty HKCU:\Environment Path $path -Type $key.GetValueKind('Path')
+```
+
+If you installed with `AGENTSWAP_INSTALL_DIR`, use that folder instead.
+
+**Saved accounts** stay until you delete them. If you set `AGENTSWAP_HOME`, delete that folder instead.
+
+```sh
+rm -rf ~/.agentswap                                   # macOS / Linux
+```
+
+```powershell
+Remove-Item -Recurse -Force "$HOME\.agentswap"        # Windows
+```
+
+**Encryption key**: Windows has nothing else to remove. On macOS and Linux the key stays in the system keyring:
+
+```sh
+security delete-generic-password -s agentswap -a vault-key   # macOS
+secret-tool clear service agentswap key vault                # Linux
+```
 
 ## Getting started
 

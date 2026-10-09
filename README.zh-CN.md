@@ -44,13 +44,48 @@ brew install wellwells/tap/agentswap
 
 ## 卸载
 
+卸载 agentswap 不会登出任何 agent，当前使用的账号会保持登录。
+
+**macOS / Linux**（用安装脚本安装）：
+
 ```sh
 agentswap unlink                  # 移除 cxswap、ccswap 等命令
-rm ~/.local/bin/agentswap         # 或：brew uninstall agentswap
-rm -rf ~/.agentswap               # 已保存的账号
+rm ~/.local/bin/agentswap
 ```
 
-Windows 请删除 `%LOCALAPPDATA%\agentswap`，并把其中的 `bin` 目录从用户 PATH 中移除。macOS 和 Linux 的加密密钥还留在钥匙串里，名称是 `agentswap`，想清理干净的话请一并删除。
+**Homebrew**：
+
+```sh
+brew uninstall agentswap
+```
+
+**Windows**（PowerShell）：删除程序目录（`cxswap`、`ccswap` 等命令也在里面），并从用户 PATH 中移除：
+
+```powershell
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\agentswap"
+$key = Get-Item HKCU:\Environment
+$path = ($key.GetValue('Path', '', 'DoNotExpandEnvironmentNames') -split ';' | Where-Object { $_ -and $_ -ne "$env:LOCALAPPDATA\agentswap\bin" }) -join ';'
+Set-ItemProperty HKCU:\Environment Path $path -Type $key.GetValueKind('Path')
+```
+
+如果安装时用 `AGENTSWAP_INSTALL_DIR` 指定了其他目录，请改成那个目录。
+
+**已保存的账号**会一直保留，直到你自己删除。设置了 `AGENTSWAP_HOME` 的话，请改删那个目录。
+
+```sh
+rm -rf ~/.agentswap                                   # macOS / Linux
+```
+
+```powershell
+Remove-Item -Recurse -Force "$HOME\.agentswap"        # Windows
+```
+
+**加密密钥**：Windows 不需要另外处理。macOS 和 Linux 的密钥还留在系统的钥匙串里：
+
+```sh
+security delete-generic-password -s agentswap -a vault-key   # macOS
+secret-tool clear service agentswap key vault                # Linux
+```
 
 ## 快速上手
 
