@@ -26,6 +26,7 @@ import (
 	"github.com/WellWells/agentswap/internal/procs"
 	"github.com/WellWells/agentswap/internal/store"
 	"github.com/WellWells/agentswap/internal/swap"
+	"github.com/WellWells/agentswap/internal/transfer"
 	"github.com/WellWells/agentswap/internal/ui"
 	"github.com/WellWells/agentswap/internal/update"
 	"github.com/WellWells/agentswap/internal/vault"
@@ -250,6 +251,10 @@ func run(e Env, prog string, args []string) int {
 			return e.report("agentswap", provider{}, unlink(e))
 		case isUpdate(args[0]):
 			return e.report("agentswap", provider{}, selfUpdate(e))
+		case args[0] == "export":
+			return e.report("agentswap", provider{}, exportAll(e, args[1:]))
+		case args[0] == "import":
+			return e.report("agentswap", provider{}, importAll(e, args[1:]))
 		case args[0] == "lang" || args[0] == "language":
 			return e.report("agentswap", provider{}, language(e, args[1:]))
 		}
@@ -388,15 +393,20 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 			alias = args[0]
 		}
 		return login(e, prog, p, m, alias)
+	case cmd == "export":
+		return exportProvider(e, prog, p, m, args)
 	case cmd == "import":
-		if p.name != "claude" {
-			return usageError(l.T("unknownCommand", cmd))
+		if p.name == "claude" && (len(args) == 0 || args[0] == "1") {
+			choice := ""
+			if len(args) > 0 {
+				choice = args[0]
+			}
+			return importMenu(e, m, choice)
 		}
-		choice := ""
-		if len(args) > 0 {
-			choice = args[0]
+		if err := need(1); err != nil {
+			return err
 		}
-		return importMenu(e, m, choice)
+		return importProvider(e, prog, p, m, args[0])
 	case cmd == "switch" || cmd == "use":
 		if err := need(1); err != nil {
 			return err
@@ -886,3 +896,133 @@ func importReason(l ui.Lang, err error) string {
 	}
 	return shortError(err)
 }
+
+func exportAll(e Env, args []string) error {
+	mgrs := make(map[string]*swap.Manager)
+	for _, name := range providerOrder {
+		p, ok := providers[name]
+		if ok && p.supported {
+			mgrs[name] = e.manager(p)
+		}
+	}
+	bundle, err := transfer.Export(mgrs)
+	if err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if len(args) == 0 || args[0] == "-" {
+		_, err = e.Stdout.Write(data)
+		return err
+	}
+	if err := fsx.WriteAtomic(args[0], data, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintln(e.Stdout, e.Lang.T("exported", args[0]))
+	return nil
+}
+
+func importAll(e Env, args []string) error {
+	if len(args) < 1 {
+		return usageError(e.Lang.T("needsArgs", "import", 1))
+	}
+	var data []byte
+	var err error
+	if args[0] == "-" {
+		if e.Stdin == nil {
+			return errors.New("cannot read from stdin")
+		}
+		data, err = io.ReadAll(e.Stdin)
+	} else {
+		data, err = os.ReadFile(args[0])
+	}
+	if err != nil {
+		return err
+	}
+	mgrs := make(map[string]*swap.Manager)
+	for _, name := range providerOrder {
+		p, ok := providers[name]
+		if ok && p.supported {
+			mgrs[name] = e.manager(p)
+		}
+	}
+	rep, err := transfer.Import(data, mgrs)
+	if err != nil {
+		return err
+	}
+	for _, succ := range rep.Successes() {
+		fmt.Fprintln(e.Stdout, e.Lang.T("imported", label(succ.Account)))
+	}
+	if len(rep.Failures()) > 0 {
+		for _, fail := range rep.Failures() {
+			name := fail.Alias
+			if name == "" {
+				name = fail.Provider
+			}
+			fmt.Fprintln(e.Stderr, e.Lang.T("importFailed", name, fail.Err.Error()))
+		}
+		return fmt.Errorf("%d account(s) not imported", len(rep.Failures()))
+	}
+	return nil
+}
+
+func exportProvider(e Env, prog string, p provider, m *swap.Manager, args []string) error {
+	mgrs := map[string]*swap.Manager{p.name: m}
+	bundle, err := transfer.Export(mgrs)
+	if err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if len(args) == 0 || args[0] == "-" {
+		_, err = e.Stdout.Write(data)
+		return err
+	}
+	if err := fsx.WriteAtomic(args[0], data, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintln(e.Stdout, e.Lang.T("exported", args[0]))
+	return nil
+}
+
+func importProvider(e Env, prog string, p provider, m *swap.Manager, path string) error {
+	var data []byte
+	var err error
+	if path == "-" {
+		if e.Stdin == nil {
+			return errors.New("cannot read from stdin")
+		}
+		data, err = io.ReadAll(e.Stdin)
+	} else {
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return err
+	}
+	mgrs := map[string]*swap.Manager{p.name: m}
+	rep, err := transfer.Import(data, mgrs)
+	if err != nil {
+		return err
+	}
+	for _, succ := range rep.Successes() {
+		fmt.Fprintln(e.Stdout, e.Lang.T("imported", label(succ.Account)))
+	}
+	if len(rep.Failures()) > 0 {
+		for _, fail := range rep.Failures() {
+			name := fail.Alias
+			if name == "" {
+				name = fail.Provider
+			}
+			fmt.Fprintln(e.Stderr, e.Lang.T("importFailed", name, fail.Err.Error()))
+		}
+		return fmt.Errorf("%d account(s) not imported", len(rep.Failures()))
+	}
+	return nil
+}
+
