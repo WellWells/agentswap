@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/WellWells/agentswap/internal/antigravity"
 	"github.com/WellWells/agentswap/internal/claude"
@@ -31,15 +32,35 @@ func Reconstruct(provider string, tokenRaw json.RawMessage) ([]byte, error) {
 }
 
 func reconstructCodex(raw json.RawMessage) ([]byte, error) {
-	// 1. Lenient check: if already a valid full snapshot
-	if _, err := codex.Identify(raw); err == nil {
-		return []byte(raw), nil
+	// 1. Lenient check: if already a valid full snapshot with auth_mode
+	var fullCheck struct {
+		AuthMode string `json:"auth_mode"`
+		Tokens   *struct {
+			IDToken     string `json:"id_token"`
+			AccessToken string `json:"access_token"`
+		} `json:"tokens"`
+		APIKey *string `json:"OPENAI_API_KEY"`
+	}
+	if err := json.Unmarshal(raw, &fullCheck); err == nil {
+		if fullCheck.AuthMode == "chatgpt" && fullCheck.Tokens != nil && fullCheck.Tokens.AccessToken != "" && fullCheck.Tokens.IDToken != "" {
+			if _, err := codex.Identify(raw); err == nil {
+				return []byte(raw), nil
+			}
+		}
+		if fullCheck.AuthMode == "apikey" && fullCheck.APIKey != nil && *fullCheck.APIKey != "" {
+			if _, err := codex.Identify(raw); err == nil {
+				return []byte(raw), nil
+			}
+		}
 	}
 
 	// 2. Check if it's a bare string (API Key)
 	var apiKey string
 	if err := json.Unmarshal(raw, &apiKey); err == nil && apiKey != "" {
-		snap, err := json.Marshal(map[string]string{"OPENAI_API_KEY": apiKey})
+		snap, err := json.Marshal(map[string]any{
+			"auth_mode":      "apikey",
+			"OPENAI_API_KEY": apiKey,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -51,16 +72,19 @@ func reconstructCodex(raw json.RawMessage) ([]byte, error) {
 
 	// 3. Check if it's a minimal tokens object or nested object
 	var obj struct {
+		AuthMode     string  `json:"auth_mode"`
 		APIKey       *string `json:"OPENAI_API_KEY"`
 		IDToken      string  `json:"id_token"`
 		RefreshToken string  `json:"refresh_token"`
 		AccountID    string  `json:"account_id"`
 		AccessToken  string  `json:"access_token"`
+		LastRefresh  string  `json:"last_refresh"`
 		Tokens       *struct {
 			IDToken      string `json:"id_token"`
 			RefreshToken string `json:"refresh_token"`
 			AccountID    string `json:"account_id"`
 			AccessToken  string `json:"access_token"`
+			LastRefresh  string `json:"last_refresh"`
 		} `json:"tokens"`
 	}
 	if err := json.Unmarshal(raw, &obj); err != nil {
@@ -68,7 +92,10 @@ func reconstructCodex(raw json.RawMessage) ([]byte, error) {
 	}
 
 	if obj.APIKey != nil && *obj.APIKey != "" {
-		snap, err := json.Marshal(map[string]string{"OPENAI_API_KEY": *obj.APIKey})
+		snap, err := json.Marshal(map[string]any{
+			"auth_mode":      "apikey",
+			"OPENAI_API_KEY": *obj.APIKey,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -82,6 +109,7 @@ func reconstructCodex(raw json.RawMessage) ([]byte, error) {
 	refreshToken := obj.RefreshToken
 	accountID := obj.AccountID
 	accessToken := obj.AccessToken
+	lastRefresh := obj.LastRefresh
 
 	if obj.Tokens != nil {
 		if idToken == "" {
@@ -96,11 +124,17 @@ func reconstructCodex(raw json.RawMessage) ([]byte, error) {
 		if accessToken == "" {
 			accessToken = obj.Tokens.AccessToken
 		}
+		if lastRefresh == "" {
+			lastRefresh = obj.Tokens.LastRefresh
+		}
 	}
 
 	if idToken != "" {
 		tokMap := map[string]string{
 			"id_token": idToken,
+		}
+		if accessToken != "" {
+			tokMap["access_token"] = accessToken
 		}
 		if refreshToken != "" {
 			tokMap["refresh_token"] = refreshToken
@@ -108,10 +142,15 @@ func reconstructCodex(raw json.RawMessage) ([]byte, error) {
 		if accountID != "" {
 			tokMap["account_id"] = accountID
 		}
-		if accessToken != "" {
-			tokMap["access_token"] = accessToken
+		if lastRefresh == "" {
+			lastRefresh = time.Now().UTC().Format(time.RFC3339)
 		}
-		snap, err := json.Marshal(map[string]any{"tokens": tokMap})
+		snap, err := json.Marshal(map[string]any{
+			"auth_mode":      "chatgpt",
+			"OPENAI_API_KEY": nil,
+			"tokens":         tokMap,
+			"last_refresh":   lastRefresh,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -136,6 +175,10 @@ func reconstructClaude(raw json.RawMessage) ([]byte, error) {
 		RefreshTokenAlt  string  `json:"refresh_token"`
 		AccessToken      string  `json:"accessToken"`
 		AccessTokenAlt   string  `json:"access_token"`
+		ExpiresAt        float64 `json:"expiresAt"`
+		ExpiresAtAlt     float64 `json:"expires_at"`
+		SubscriptionType string  `json:"subscriptionType"`
+		SubTypeAlt       string  `json:"subscription_type"`
 		AccountUUID      string  `json:"accountUuid"`
 		AccountUUIDAlt   string  `json:"account_uuid"`
 		OrganizationUUID *string `json:"organizationUuid"`
@@ -155,6 +198,14 @@ func reconstructClaude(raw json.RawMessage) ([]byte, error) {
 	if accessToken == "" {
 		accessToken = obj.AccessTokenAlt
 	}
+	expiresAt := obj.ExpiresAt
+	if expiresAt == 0 {
+		expiresAt = obj.ExpiresAtAlt
+	}
+	subType := obj.SubscriptionType
+	if subType == "" {
+		subType = obj.SubTypeAlt
+	}
 	accountUUID := obj.AccountUUID
 	if accountUUID == "" {
 		accountUUID = obj.AccountUUIDAlt
@@ -168,11 +219,18 @@ func reconstructClaude(raw json.RawMessage) ([]byte, error) {
 		email = obj.EmailAlt
 	}
 
+	aiMap := map[string]any{
+		"accessToken":  accessToken,
+		"refreshToken": refreshToken,
+	}
+	if expiresAt > 0 {
+		aiMap["expiresAt"] = expiresAt
+	}
+	if subType != "" {
+		aiMap["subscriptionType"] = subType
+	}
 	credsData := map[string]any{
-		"claudeAiOauth": map[string]any{
-			"accessToken":  accessToken,
-			"refreshToken": refreshToken,
-		},
+		"claudeAiOauth": aiMap,
 	}
 	credsBytes, err := json.Marshal(credsData)
 	if err != nil {
@@ -199,9 +257,17 @@ func reconstructClaude(raw json.RawMessage) ([]byte, error) {
 }
 
 func reconstructAntigravity(raw json.RawMessage) ([]byte, error) {
-	// 1. Lenient check: if already a valid full snapshot
-	if _, err := antigravity.Identify(raw); err == nil {
-		return []byte(raw), nil
+	// 1. Lenient check: if already a valid full snapshot with auth_method
+	var check struct {
+		AuthMethod string `json:"auth_method"`
+		Token      *struct {
+			RefreshToken string `json:"refresh_token"`
+		} `json:"token"`
+	}
+	if err := json.Unmarshal(raw, &check); err == nil && check.AuthMethod != "" && check.Token != nil && check.Token.RefreshToken != "" {
+		if _, err := antigravity.Identify(raw); err == nil {
+			return []byte(raw), nil
+		}
 	}
 
 	// 2. Parse minimal object
@@ -212,6 +278,8 @@ func reconstructAntigravity(raw json.RawMessage) ([]byte, error) {
 		RefreshTokenAlt string `json:"refreshToken"`
 		AccessToken     string `json:"access_token"`
 		AccessTokenAlt  string `json:"accessToken"`
+		AuthMethod      string `json:"auth_method"`
+		AuthMethodAlt   string `json:"authMethod"`
 		Token           *struct {
 			AccessToken  string `json:"access_token"`
 			RefreshToken string `json:"refresh_token"`
@@ -233,6 +301,13 @@ func reconstructAntigravity(raw json.RawMessage) ([]byte, error) {
 	if accessToken == "" {
 		accessToken = obj.AccessTokenAlt
 	}
+	authMethod := obj.AuthMethod
+	if authMethod == "" {
+		authMethod = obj.AuthMethodAlt
+	}
+	if authMethod == "" {
+		authMethod = "consumer"
+	}
 
 	if obj.Token != nil {
 		if refreshToken == "" {
@@ -251,8 +326,9 @@ func reconstructAntigravity(raw json.RawMessage) ([]byte, error) {
 	}
 
 	credsData := map[string]any{
-		"token":    tokMap,
-		"id_token": idToken,
+		"token":       tokMap,
+		"id_token":    idToken,
+		"auth_method": authMethod,
 	}
 	snap, err := json.Marshal(credsData)
 	if err != nil {

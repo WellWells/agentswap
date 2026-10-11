@@ -87,6 +87,20 @@ func TestCodexAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconstruct codex apikey: %v", err)
 	}
+	var reconKey struct {
+		AuthMode string `json:"auth_mode"`
+		APIKey   string `json:"OPENAI_API_KEY"`
+	}
+	if err := json.Unmarshal(reconstructed, &reconKey); err != nil {
+		t.Fatalf("unmarshal reconstructed key: %v", err)
+	}
+	if reconKey.AuthMode != "apikey" {
+		t.Fatalf("expected auth_mode == 'apikey', got %q", reconKey.AuthMode)
+	}
+	if reconKey.APIKey != "sk-proj-1234567890abcdef" {
+		t.Fatalf("expected OPENAI_API_KEY == 'sk-proj-1234567890abcdef', got %q", reconKey.APIKey)
+	}
+
 	id, err := codex.Identify(reconstructed)
 	if err != nil {
 		t.Fatalf("identify reconstructed codex apikey: %v", err)
@@ -127,12 +141,15 @@ func TestCodexOAuth(t *testing.T) {
 		},
 	})
 	snap, _ := json.Marshal(map[string]any{
+		"auth_mode":      "chatgpt",
+		"OPENAI_API_KEY": nil,
 		"tokens": map[string]any{
 			"id_token":      idToken,
 			"refresh_token": "rt-openai",
 			"account_id":    "org-xyz",
 			"access_token":  "at-openai",
 		},
+		"last_refresh": "2026-10-08T00:00:00Z",
 	})
 
 	// 1. Extract
@@ -141,17 +158,95 @@ func TestCodexOAuth(t *testing.T) {
 		t.Fatalf("extract codex oauth: %v", err)
 	}
 
+	// Verify extracted token has access_token and last_refresh
+	var extracted struct {
+		AuthMode     string `json:"auth_mode"`
+		IDToken      string `json:"id_token"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		AccountID    string `json:"account_id"`
+		LastRefresh  string `json:"last_refresh"`
+	}
+	if err := json.Unmarshal(tokRaw, &extracted); err != nil {
+		t.Fatalf("unmarshal extracted token: %v", err)
+	}
+	if extracted.AuthMode != "chatgpt" || extracted.AccessToken != "at-openai" || extracted.LastRefresh != "2026-10-08T00:00:00Z" {
+		t.Fatalf("unexpected extracted token fields: %+v", extracted)
+	}
+
 	// 2. Reconstruct
 	reconstructed, err := Reconstruct("codex", tokRaw)
 	if err != nil {
 		t.Fatalf("reconstruct codex oauth: %v", err)
 	}
+
+	// Verify reconstructed snapshot matches official Codex auth.json schema
+	var recon struct {
+		AuthMode     string  `json:"auth_mode"`
+		OpenAIAPIKey *string `json:"OPENAI_API_KEY"`
+		LastRefresh  string  `json:"last_refresh"`
+		Tokens       struct {
+			IDToken      string `json:"id_token"`
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			AccountID    string `json:"account_id"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(reconstructed, &recon); err != nil {
+		t.Fatalf("unmarshal reconstructed: %v", err)
+	}
+	if recon.AuthMode != "chatgpt" {
+		t.Fatalf("expected auth_mode == 'chatgpt', got %q", recon.AuthMode)
+	}
+	if recon.Tokens.AccessToken != "at-openai" {
+		t.Fatalf("expected access_token == 'at-openai', got %q", recon.Tokens.AccessToken)
+	}
+	if recon.Tokens.RefreshToken != "rt-openai" {
+		t.Fatalf("expected refresh_token == 'rt-openai', got %q", recon.Tokens.RefreshToken)
+	}
+	if recon.Tokens.IDToken != idToken {
+		t.Fatalf("expected id_token == %q, got %q", idToken, recon.Tokens.IDToken)
+	}
+	if recon.Tokens.AccountID != "org-xyz" {
+		t.Fatalf("expected account_id == 'org-xyz', got %q", recon.Tokens.AccountID)
+	}
+	if recon.LastRefresh != "2026-10-08T00:00:00Z" {
+		t.Fatalf("expected last_refresh == '2026-10-08T00:00:00Z', got %q", recon.LastRefresh)
+	}
+	if recon.OpenAIAPIKey != nil {
+		t.Fatalf("expected OPENAI_API_KEY to be null, got %v", *recon.OpenAIAPIKey)
+	}
+
 	id, err := codex.Identify(reconstructed)
 	if err != nil {
 		t.Fatalf("identify reconstructed oauth: %v", err)
 	}
-	if id.Email != "user@openai.com" || id.Plan != "plus" {
+	if id.Email != "user@openai.com" || id.Plan != "plus" || id.Mode != "chatgpt" {
 		t.Fatalf("unexpected identity: %+v", id)
+	}
+
+	// Test backward compatibility: legacy token without access_token or last_refresh
+	legacyTok := []byte(`{"id_token":"` + idToken + `","refresh_token":"rt-legacy","account_id":"org-xyz"}`)
+	reconLegacy, err := Reconstruct("codex", legacyTok)
+	if err != nil {
+		t.Fatalf("reconstruct legacy token: %v", err)
+	}
+	var reconLegacyObj struct {
+		AuthMode    string `json:"auth_mode"`
+		LastRefresh string `json:"last_refresh"`
+		Tokens      struct {
+			IDToken      string `json:"id_token"`
+			RefreshToken string `json:"refresh_token"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(reconLegacy, &reconLegacyObj); err != nil {
+		t.Fatalf("unmarshal legacy reconstructed: %v", err)
+	}
+	if reconLegacyObj.AuthMode != "chatgpt" {
+		t.Fatalf("expected auth_mode chatgpt for legacy token, got %q", reconLegacyObj.AuthMode)
+	}
+	if reconLegacyObj.LastRefresh == "" {
+		t.Fatalf("expected non-empty last_refresh for legacy token")
 	}
 
 	// 3. Import
@@ -174,8 +269,10 @@ func TestCodexOAuth(t *testing.T) {
 func TestClaude(t *testing.T) {
 	credsData, _ := json.Marshal(map[string]any{
 		"claudeAiOauth": map[string]any{
-			"accessToken":  "at-claude",
-			"refreshToken": "rt-claude",
+			"accessToken":      "at-claude",
+			"refreshToken":     "rt-claude",
+			"expiresAt":        1735689600.0,
+			"subscriptionType": "team",
 		},
 	})
 	oauthData, _ := json.Marshal(map[string]any{
@@ -191,6 +288,20 @@ func TestClaude(t *testing.T) {
 		t.Fatalf("extract claude: %v", err)
 	}
 
+	// Verify extracted token preserves subscriptionType and expiresAt
+	var extracted struct {
+		RefreshToken     string  `json:"refreshToken"`
+		AccessToken      string  `json:"accessToken"`
+		ExpiresAt        float64 `json:"expiresAt"`
+		SubscriptionType string  `json:"subscriptionType"`
+	}
+	if err := json.Unmarshal(tokRaw, &extracted); err != nil {
+		t.Fatalf("unmarshal extracted claude: %v", err)
+	}
+	if extracted.SubscriptionType != "team" || extracted.ExpiresAt != 1735689600.0 {
+		t.Fatalf("unexpected extracted claude fields: %+v", extracted)
+	}
+
 	// 2. Reconstruct
 	reconstructed, err := Reconstruct("claude", tokRaw)
 	if err != nil {
@@ -200,7 +311,7 @@ func TestClaude(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identify reconstructed claude: %v", err)
 	}
-	if id.Email != "claude@example.com" || id.Key != "claude:uuid-claude-1:org-claude-1" {
+	if id.Email != "claude@example.com" || id.Key != "claude:uuid-claude-1:org-claude-1" || id.Plan != "team" {
 		t.Fatalf("unexpected identity: %+v", id)
 	}
 
@@ -231,7 +342,8 @@ func TestAntigravity(t *testing.T) {
 			"access_token":  "at-agy",
 			"refresh_token": "rt-agy",
 		},
-		"id_token": idToken,
+		"id_token":    idToken,
+		"auth_method": "consumer",
 	})
 
 	// 1. Extract
@@ -240,11 +352,32 @@ func TestAntigravity(t *testing.T) {
 		t.Fatalf("extract antigravity: %v", err)
 	}
 
+	var extracted struct {
+		AuthMethod string `json:"auth_method"`
+	}
+	if err := json.Unmarshal(tokRaw, &extracted); err != nil {
+		t.Fatalf("unmarshal extracted antigravity: %v", err)
+	}
+	if extracted.AuthMethod != "consumer" {
+		t.Fatalf("expected auth_method consumer, got %q", extracted.AuthMethod)
+	}
+
 	// 2. Reconstruct
 	reconstructed, err := Reconstruct("antigravity", tokRaw)
 	if err != nil {
 		t.Fatalf("reconstruct antigravity: %v", err)
 	}
+
+	var reconAG struct {
+		AuthMethod string `json:"auth_method"`
+	}
+	if err := json.Unmarshal(reconstructed, &reconAG); err != nil {
+		t.Fatalf("unmarshal reconstructed antigravity: %v", err)
+	}
+	if reconAG.AuthMethod != "consumer" {
+		t.Fatalf("expected auth_method 'consumer', got %q", reconAG.AuthMethod)
+	}
+
 	id, err := antigravity.Identify(reconstructed)
 	if err != nil {
 		t.Fatalf("identify reconstructed antigravity: %v", err)
@@ -333,11 +466,15 @@ func TestRoundTripExportImport(t *testing.T) {
 		},
 	})
 	snapCXOAuth, _ := json.Marshal(map[string]any{
+		"auth_mode":      "chatgpt",
+		"OPENAI_API_KEY": nil,
 		"tokens": map[string]any{
 			"id_token":      idTokenCX,
+			"access_token":  "at-cx-roundtrip",
 			"refresh_token": "rt-cx-roundtrip",
 			"account_id":    "acct-cx",
 		},
+		"last_refresh": "2026-10-08T00:00:00Z",
 	})
 	if _, err := mgrsSrc["codex"].Import(snapCXOAuth, "cx-oauth"); err != nil {
 		t.Fatalf("seed cx oauth: %v", err)
@@ -346,8 +483,10 @@ func TestRoundTripExportImport(t *testing.T) {
 	// 3) Claude
 	credsClaude, _ := json.Marshal(map[string]any{
 		"claudeAiOauth": map[string]any{
-			"accessToken":  "at-cl-roundtrip",
-			"refreshToken": "rt-cl-roundtrip",
+			"accessToken":      "at-cl-roundtrip",
+			"refreshToken":     "rt-cl-roundtrip",
+			"expiresAt":        1735689600.0,
+			"subscriptionType": "pro",
 		},
 	})
 	oauthClaude, _ := json.Marshal(map[string]any{
@@ -368,7 +507,8 @@ func TestRoundTripExportImport(t *testing.T) {
 			"refresh_token": "rt-ag-roundtrip",
 			"access_token":  "at-ag-roundtrip",
 		},
-		"id_token": idTokenAG,
+		"id_token":    idTokenAG,
+		"auth_method": "consumer",
 	})
 	if _, err := mgrsSrc["antigravity"].Import(snapAG, "ag-alias"); err != nil {
 		t.Fatalf("seed antigravity: %v", err)
@@ -409,12 +549,63 @@ func TestRoundTripExportImport(t *testing.T) {
 	if len(regCX.Accounts) != 2 {
 		t.Fatalf("expected 2 codex accounts, got %d", len(regCX.Accounts))
 	}
+	// Check the reconstructed codex OAuth snapshot saved in target store
+	for _, acct := range regCX.Accounts {
+		if acct.Alias == "cx-oauth" {
+			snapBytes, err := mgrsDst["codex"].S.ReadSnapshot(acct.Key)
+			if err != nil {
+				t.Fatalf("read codex snapshot: %v", err)
+			}
+			var cxSnap struct {
+				AuthMode    string `json:"auth_mode"`
+				LastRefresh string `json:"last_refresh"`
+				Tokens      struct {
+					AccessToken  string `json:"access_token"`
+					RefreshToken string `json:"refresh_token"`
+					IDToken      string `json:"id_token"`
+				} `json:"tokens"`
+			}
+			if err := json.Unmarshal(snapBytes, &cxSnap); err != nil {
+				t.Fatalf("unmarshal target codex snapshot: %v", err)
+			}
+			if cxSnap.AuthMode != "chatgpt" {
+				t.Fatalf("expected auth_mode == 'chatgpt', got %q", cxSnap.AuthMode)
+			}
+			if cxSnap.Tokens.AccessToken != "at-cx-roundtrip" {
+				t.Fatalf("expected access_token == 'at-cx-roundtrip', got %q", cxSnap.Tokens.AccessToken)
+			}
+			if cxSnap.Tokens.RefreshToken != "rt-cx-roundtrip" {
+				t.Fatalf("expected refresh_token == 'rt-cx-roundtrip', got %q", cxSnap.Tokens.RefreshToken)
+			}
+			if cxSnap.LastRefresh != "2026-10-08T00:00:00Z" {
+				t.Fatalf("expected last_refresh == '2026-10-08T00:00:00Z', got %q", cxSnap.LastRefresh)
+			}
+		}
+	}
+
 	regCL, _ := mgrsDst["claude"].S.Load()
 	if len(regCL.Accounts) != 1 || regCL.Accounts[0].Alias != "cl-alias" {
 		t.Fatalf("unexpected claude accounts: %+v", regCL.Accounts)
 	}
+	if regCL.Accounts[0].Plan != "pro" {
+		t.Fatalf("expected claude plan == 'pro', got %q", regCL.Accounts[0].Plan)
+	}
+
 	regAG, _ := mgrsDst["antigravity"].S.Load()
 	if len(regAG.Accounts) != 1 || regAG.Accounts[0].Alias != "ag-alias" {
 		t.Fatalf("unexpected antigravity accounts: %+v", regAG.Accounts)
+	}
+	agSnapBytes, err := mgrsDst["antigravity"].S.ReadSnapshot(regAG.Accounts[0].Key)
+	if err != nil {
+		t.Fatalf("read antigravity snapshot: %v", err)
+	}
+	var agSnap struct {
+		AuthMethod string `json:"auth_method"`
+	}
+	if err := json.Unmarshal(agSnapBytes, &agSnap); err != nil {
+		t.Fatalf("unmarshal target antigravity snapshot: %v", err)
+	}
+	if agSnap.AuthMethod != "consumer" {
+		t.Fatalf("expected target auth_method == 'consumer', got %q", agSnap.AuthMethod)
 	}
 }

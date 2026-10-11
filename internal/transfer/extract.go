@@ -25,12 +25,16 @@ func Extract(provider string, snapshot []byte) (json.RawMessage, error) {
 
 func extractCodex(b []byte) (json.RawMessage, error) {
 	var a struct {
-		APIKey *string `json:"OPENAI_API_KEY"`
-		Tokens *struct {
+		AuthMode    string  `json:"auth_mode"`
+		APIKey      *string `json:"OPENAI_API_KEY"`
+		Tokens      *struct {
 			IDToken      string `json:"id_token"`
+			AccessToken  string `json:"access_token"`
 			RefreshToken string `json:"refresh_token"`
 			AccountID    string `json:"account_id"`
+			LastRefresh  string `json:"last_refresh"`
 		} `json:"tokens"`
+		LastRefresh string `json:"last_refresh"`
 	}
 	if err := json.Unmarshal(b, &a); err != nil {
 		return nil, fmt.Errorf("codex snapshot: %w", err)
@@ -43,14 +47,28 @@ func extractCodex(b []byte) (json.RawMessage, error) {
 		return json.RawMessage(res), nil
 	}
 	if a.Tokens != nil && a.Tokens.IDToken != "" {
+		lastRefresh := a.LastRefresh
+		if lastRefresh == "" && a.Tokens.LastRefresh != "" {
+			lastRefresh = a.Tokens.LastRefresh
+		}
+		authMode := a.AuthMode
+		if authMode == "" {
+			authMode = "chatgpt"
+		}
 		minTokens := struct {
+			AuthMode     string `json:"auth_mode,omitempty"`
 			IDToken      string `json:"id_token"`
+			AccessToken  string `json:"access_token,omitempty"`
 			RefreshToken string `json:"refresh_token,omitempty"`
 			AccountID    string `json:"account_id,omitempty"`
+			LastRefresh  string `json:"last_refresh,omitempty"`
 		}{
+			AuthMode:     authMode,
 			IDToken:      a.Tokens.IDToken,
+			AccessToken:  a.Tokens.AccessToken,
 			RefreshToken: a.Tokens.RefreshToken,
 			AccountID:    a.Tokens.AccountID,
+			LastRefresh:  lastRefresh,
 		}
 		res, err := json.Marshal(minTokens)
 		if err != nil {
@@ -75,8 +93,10 @@ func extractClaude(b []byte) (json.RawMessage, error) {
 
 	var creds struct {
 		ClaudeAiOauth *struct {
-			AccessToken  string `json:"accessToken"`
-			RefreshToken string `json:"refreshToken"`
+			AccessToken      string  `json:"accessToken"`
+			RefreshToken     string  `json:"refreshToken"`
+			ExpiresAt        float64 `json:"expiresAt"`
+			SubscriptionType string  `json:"subscriptionType"`
 		} `json:"claudeAiOauth"`
 	}
 	if err := json.Unmarshal(snap.Credentials, &creds); err != nil {
@@ -98,12 +118,16 @@ func extractClaude(b []byte) (json.RawMessage, error) {
 	minClaude := struct {
 		RefreshToken     string  `json:"refreshToken"`
 		AccessToken      string  `json:"accessToken,omitempty"`
+		ExpiresAt        float64 `json:"expiresAt,omitempty"`
+		SubscriptionType string  `json:"subscriptionType,omitempty"`
 		AccountUUID      string  `json:"accountUuid"`
 		OrganizationUUID *string `json:"organizationUuid,omitempty"`
 		EmailAddress     string  `json:"emailAddress,omitempty"`
 	}{
 		RefreshToken:     creds.ClaudeAiOauth.RefreshToken,
 		AccessToken:      creds.ClaudeAiOauth.AccessToken,
+		ExpiresAt:        creds.ClaudeAiOauth.ExpiresAt,
+		SubscriptionType: creds.ClaudeAiOauth.SubscriptionType,
 		AccountUUID:      acct.AccountUUID,
 		OrganizationUUID: acct.OrganizationUUID,
 		EmailAddress:     acct.EmailAddress,
@@ -122,19 +146,26 @@ func extractAntigravity(b []byte) (json.RawMessage, error) {
 			AccessToken  string `json:"access_token"`
 			RefreshToken string `json:"refresh_token"`
 		} `json:"token"`
-		IDToken string `json:"id_token"`
+		IDToken    string `json:"id_token"`
+		AuthMethod string `json:"auth_method"`
 	}
 	if err := json.Unmarshal(b, &snap); err != nil {
 		return nil, fmt.Errorf("antigravity snapshot: %w", err)
+	}
+	authMethod := snap.AuthMethod
+	if authMethod == "" {
+		authMethod = "consumer"
 	}
 	minAgy := struct {
 		IDToken      string `json:"id_token"`
 		RefreshToken string `json:"refresh_token"`
 		AccessToken  string `json:"access_token,omitempty"`
+		AuthMethod   string `json:"auth_method,omitempty"`
 	}{
 		IDToken:      snap.IDToken,
 		RefreshToken: snap.Token.RefreshToken,
 		AccessToken:  snap.Token.AccessToken,
+		AuthMethod:   authMethod,
 	}
 	res, err := json.Marshal(minAgy)
 	if err != nil {
