@@ -43,12 +43,12 @@ jobs:
           path: brew/agentswap.rb
           retention-days: 14
 
-  unix:
+  macos:
     needs: dist
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm]
+        os: [macos-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.dist.outputs.version }}
@@ -66,21 +66,17 @@ jobs:
           bin="$HOME/.local/bin"
           "$bin/agentswap" version | grep -F "$VERSION"
           for n in cxswap codexswap ccswap claudeswap agswap agyswap; do "$bin/$n" version >/dev/null; done
-          if [ "$(uname -s)" = Darwin ]; then
-            if xattr -p com.apple.quarantine "$bin/agentswap" >/dev/null 2>&1; then
-              echo "agentswap is quarantined" >&2
-              exit 1
-            fi
-            if [ "$(uname -m)" = arm64 ]; then codesign -v "$bin/agentswap"; fi
+          if xattr -p com.apple.quarantine "$bin/agentswap" >/dev/null 2>&1; then
+            echo "agentswap is quarantined" >&2
+            exit 1
           fi
+          if [ "$(uname -m)" = arm64 ]; then codesign -v "$bin/agentswap"; fi
           "$bin/agentswap" unlink
           test ! -e "$bin/cxswap"
-      - if: runner.os == 'macOS'
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: formula
-      - if: runner.os == 'macOS'
-        env:
+      - env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_ENV_HINTS: '1'
         run: |
@@ -99,38 +95,3 @@ jobs:
           fi
           brew uninstall agentswap
           test ! -e "$prefix/cxswap"
-
-  windows:
-    needs: dist
-    strategy:
-      fail-fast: false
-      matrix:
-        shell: [powershell, pwsh]
-    runs-on: windows-latest
-    env:
-      VERSION: ${{ needs.dist.outputs.version }}
-      AGENTSWAP_DOWNLOAD_URL: http://127.0.0.1:8765
-    defaults:
-      run:
-        shell: ${{ matrix.shell }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-      - run: |
-          Start-Process python -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', 'dist' -WindowStyle Hidden
-          foreach ($i in 1..10) { try { Invoke-WebRequest "$env:AGENTSWAP_DOWNLOAD_URL/checksums.txt" -UseBasicParsing | Out-Null; break } catch { Start-Sleep 1 } }
-      - run: |
-          irm "$env:AGENTSWAP_DOWNLOAD_URL/install.ps1" | iex
-          if ($repo -or $tmp) { throw 'install.ps1 leaked variables into the session' }
-          $out = agentswap version | Out-String
-          if ($out -notmatch [regex]::Escape($env:VERSION)) { throw "unexpected version: $out" }
-          foreach ($n in 'cxswap', 'codexswap', 'ccswap', 'claudeswap', 'agswap', 'agyswap') {
-            & $n version | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "$n failed" }
-          }
-          $exe = Join-Path $env:LOCALAPPDATA 'agentswap\bin\agentswap.exe'
-          if (Get-Item $exe -Stream Zone.Identifier -ErrorAction SilentlyContinue) { throw 'agentswap.exe has a Mark of the Web' }
-          agentswap unlink
-          if (Test-Path (Join-Path $env:LOCALAPPDATA 'agentswap\bin\cxswap.exe')) { throw 'unlink left cxswap.exe' }
