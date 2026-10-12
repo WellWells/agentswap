@@ -26,6 +26,7 @@ import (
 	"github.com/WellWells/agentswap/internal/procs"
 	"github.com/WellWells/agentswap/internal/store"
 	"github.com/WellWells/agentswap/internal/swap"
+	"github.com/WellWells/agentswap/internal/transfer"
 	"github.com/WellWells/agentswap/internal/ui"
 	"github.com/WellWells/agentswap/internal/update"
 	"github.com/WellWells/agentswap/internal/vault"
@@ -47,6 +48,7 @@ type Env struct {
 	Exec    func(env []string, name string, args ...string) error
 	Output  func(env []string, name string, args ...string) ([]byte, error)
 	Stdin   io.Reader
+	Secret  func() (string, error)
 	GOOS    string
 	Run     execx.Runner
 	Vault   vault.Vault
@@ -136,13 +138,14 @@ type provider struct {
 	procNames []string
 	procSkip  []string
 	mustStop  bool
+	rotates   bool
 	open      func(Env) swap.Provider
 }
 
 var providerOrder = []string{"codex", "claude", "antigravity"}
 
 var providers = map[string]provider{
-	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", loginCmd: []string{"codex", "login"}, homeEnv: "CODEX_HOME", homeDir: ".codex", homeCopy: []string{"config.toml"}, daemon: []string{"codex", "app-server", "daemon"}, hint: "hintCodex", usage: "usage", empty: "emptyProvider", addMore: "listAddMore", procNames: []string{"codex"}, open: func(e Env) swap.Provider {
+	"codex": {name: "codex", display: "Codex", supported: true, login: "codex login", loginCmd: []string{"codex", "login"}, homeEnv: "CODEX_HOME", homeDir: ".codex", homeCopy: []string{"config.toml"}, daemon: []string{"codex", "app-server", "daemon"}, hint: "hintCodex", usage: "usage", empty: "emptyProvider", addMore: "listAddMore", procNames: []string{"codex"}, rotates: true, open: func(e Env) swap.Provider {
 		return codex.Provider{
 			Home:       e.dir("CODEX_HOME", ".codex"),
 			BaseURL:    e.Endpoints.CodexAPI,
@@ -150,7 +153,7 @@ var providers = map[string]provider{
 			UserAgent:  e.clients().Codex,
 		}
 	}},
-	"claude": {name: "claude", display: "Claude Code", supported: true, login: "claude auth login", official: "loginOfficial", hint: "hintClaude", usage: "usageClaude", empty: "emptyClaude", addMore: "listAddMoreClaude", procNames: []string{"claude"}, procSkip: []string{"AnthropicClaude", "Claude.app/Contents/MacOS/Claude"}, open: func(e Env) swap.Provider {
+	"claude": {name: "claude", display: "Claude Code", supported: true, login: "claude auth login", official: "loginOfficial", hint: "hintClaude", usage: "usageClaude", empty: "emptyClaude", addMore: "listAddMoreClaude", procNames: []string{"claude"}, procSkip: []string{"AnthropicClaude", "Claude.app/Contents/MacOS/Claude"}, rotates: true, open: func(e Env) swap.Provider {
 		p := claude.New(e.Getenv, e.Home, e.goos(), e.Run)
 		p.BaseURL, p.RefreshURL = e.Endpoints.ClaudeAPI, e.Endpoints.ClaudeToken
 		p.UserAgent = e.clients().Claude
@@ -250,6 +253,10 @@ func run(e Env, prog string, args []string) int {
 			return e.report("agentswap", provider{}, unlink(e))
 		case isUpdate(args[0]):
 			return e.report("agentswap", provider{}, selfUpdate(e))
+		case args[0] == "export":
+			return e.report("agentswap", provider{}, exportAccounts(e, providerOrder, args[1:]))
+		case args[0] == "import":
+			return e.report("agentswap", provider{}, importAccounts(e, providerOrder, args[1:]))
 		case args[0] == "lang" || args[0] == "language":
 			return e.report("agentswap", provider{}, language(e, args[1:]))
 		}
@@ -333,6 +340,12 @@ func (e Env) report(prog string, p provider, err error) int {
 		msg = l.T("vaultKey")
 	case errors.Is(err, vault.ErrCorrupt):
 		msg = l.T("vaultCorrupt")
+	case errors.Is(err, transfer.ErrFormat):
+		msg = l.T("importNotExport")
+	case errors.Is(err, transfer.ErrVersion):
+		msg = l.T("importNewer")
+	case errors.Is(err, transfer.ErrPassphrase):
+		msg = l.T("passphraseWrong")
 	case errors.As(err, &ii):
 		msg = l.T("cswapIncomplete", ii.failed, ii.dir, prog)
 	}
@@ -388,15 +401,17 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 			alias = args[0]
 		}
 		return login(e, prog, p, m, alias)
+	case cmd == "export":
+		return exportAccounts(e, []string{p.name}, args)
 	case cmd == "import":
-		if p.name != "claude" {
-			return usageError(l.T("unknownCommand", cmd))
+		if p.name == "claude" && (len(args) == 0 || args[0] == "1") {
+			choice := ""
+			if len(args) > 0 {
+				choice = args[0]
+			}
+			return importMenu(e, m, choice)
 		}
-		choice := ""
-		if len(args) > 0 {
-			choice = args[0]
-		}
-		return importMenu(e, m, choice)
+		return importAccounts(e, []string{p.name}, args)
 	case cmd == "switch" || cmd == "use":
 		if err := need(1); err != nil {
 			return err
@@ -854,23 +869,9 @@ func importCswap(e Env, m *swap.Manager, dir string) error {
 			}
 			continue
 		}
-		acc, err := m.Adopt(a.Snapshot, a.Alias)
-		if err != nil && a.Alias != "" && errors.Is(err, swap.ErrAlias) {
-			fmt.Fprintln(e.Stdout, l.T("importAliasDropped", a.Alias, ui.Clean(a.Email)))
-			acc, err = m.Adopt(a.Snapshot, "")
+		if !adopt(e, m, a.Snapshot, a.Alias, name, ui.Clean(a.Email)) {
+			failed++
 		}
-		if errors.Is(err, swap.ErrExists) {
-			fmt.Fprintln(e.Stdout, l.T("importSkipped", name))
-			continue
-		}
-		if err != nil {
-			fmt.Fprintln(e.Stdout, l.T("importFailed", name, importReason(l, err)))
-			if !errors.Is(err, claude.ErrUnsupportedLogin) {
-				failed++
-			}
-			continue
-		}
-		fmt.Fprintln(e.Stdout, l.T("imported", label(acc)))
 	}
 	fmt.Fprintln(e.Stdout)
 	if failed > 0 {
@@ -878,6 +879,25 @@ func importCswap(e Env, m *swap.Manager, dir string) error {
 	}
 	fmt.Fprintln(e.Stdout, l.T("cswapAfter", dir))
 	return nil
+}
+
+func adopt(e Env, m *swap.Manager, raw []byte, alias, name, email string) bool {
+	l := e.Lang
+	acc, err := m.Adopt(raw, alias)
+	if err != nil && alias != "" && errors.Is(err, swap.ErrAlias) {
+		fmt.Fprintln(e.Stdout, l.T("importAliasDropped", alias, email))
+		acc, err = m.Adopt(raw, "")
+	}
+	if errors.Is(err, swap.ErrExists) {
+		fmt.Fprintln(e.Stdout, l.T("importSkipped", name))
+		return true
+	}
+	if err != nil {
+		fmt.Fprintln(e.Stdout, l.T("importFailed", name, importReason(l, err)))
+		return errors.Is(err, claude.ErrUnsupportedLogin)
+	}
+	fmt.Fprintln(e.Stdout, l.T("imported", label(acc)))
+	return true
 }
 
 func importReason(l ui.Lang, err error) string {

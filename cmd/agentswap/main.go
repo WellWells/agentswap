@@ -64,6 +64,7 @@ func main() {
 		Exec:        run,
 		Output:      output,
 		Stdin:       os.Stdin,
+		Secret:      func() (string, error) { return ui.ReadSecret(os.Stdin) },
 		Interactive: ui.IsTerminal(os.Stdin),
 		Notify:      ui.IsTerminal(os.Stderr),
 		Releases:    update.Source{Repo: repo},

@@ -377,6 +377,23 @@ func TestAdoptSavesLiveCopyAndNeverWritesLive(t *testing.T) {
 	}
 }
 
+func TestSnapshotsSyncsLiveFirst(t *testing.T) {
+	m, f := newManager(t)
+	addAccount(t, m, f, "k1|a@x|v1", "work")
+	addAccount(t, m, f, "k2|b@x|v1", "")
+	f.live = []byte("k2|b@x|v2")
+	got, err := m.Snapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Account.Alias != "work" || string(got[0].Raw) != "k1|a@x|v1" || string(got[1].Raw) != "k2|b@x|v2" {
+		t.Fatalf("got %+v", got)
+	}
+	if f.writes != 0 {
+		t.Fatalf("Snapshots wrote live credentials %d times", f.writes)
+	}
+}
+
 func TestUsageOfQueriesOnlyThatAccount(t *testing.T) {
 	m, f := newManager(t)
 	ur := &usageRecorder{fakeProvider: f, active: map[string]bool{}}

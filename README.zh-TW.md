@@ -146,6 +146,15 @@ agswap 2                 # 會先詢問是否關閉執行中的 agy
 
 要新增帳號，在 agy 裡執行 `/logout`，登入另一個帳號後再執行 `agswap add`。登出不會影響已存的帳號。agy 只在啟動時讀取登入，所以 `agswap` 會詢問是否關閉所有執行中的 agy（包括 `agy remote-control`），選否就取消切換。桌面版目前還不支援。
 
+### 換到另一台電腦
+
+```sh
+agentswap export accounts.json   # 會要求輸入兩次密碼
+agentswap import accounts.json   # 在另一台電腦上執行
+```
+
+檔案以你設定的密碼加密（至少 8 個字元，輸入時不會顯示）。`cxswap export` 等各 agent 的指令只匯出該 agent。另一台電腦上已存的帳號會略過，目前登入的帳號也不會被改動。匯入後請刪除檔案。Codex 與 Claude Code 的 refresh token 會輪替，同一個帳號在兩台電腦同時使用，其中一台可能需要重新登入。
+
 ## 指令
 
 | Agent | 指令 |
@@ -164,10 +173,13 @@ agswap 2                 # 會先詢問是否關閉執行中的 agy
 | `cxswap -` | 切回上一個帳號 |
 | `cxswap add [alias]` | 儲存目前登入的帳號 |
 | `cxswap login [alias]` | 僅 Codex：登入另一個帳號並儲存 |
-| `ccswap import` | 僅 Claude Code：從 claude-swap 匯入帳號 |
+| `ccswap import` | 僅 Claude Code：不指定檔案時，從 claude-swap 匯入帳號 |
 | `cxswap alias <account> [name]` | 設定別名，不給名稱則清除 |
 | `cxswap rm <account>` | 移除已存的帳號（不會登出） |
+| `cxswap export <file>` | 把帳號匯出成以密碼加密的檔案；`--plain` 經兩次確認後以明文寫出 |
+| `cxswap import <file>` | 從匯出檔匯入帳號，已存的帳號會略過 |
 | `agentswap status` | 一次顯示所有 agent |
+| `agentswap export <file>`、`agentswap import <file>` | 一次處理所有 agent |
 | `agentswap lang [language]` | 英文（`en`）、繁體中文（`zh-TW`）或簡體中文（`zh-CN`）；`auto` 跟隨系統 |
 
 任何指令不帶參數執行，都會顯示說明。
@@ -184,7 +196,7 @@ agswap 2                 # 會先詢問是否關閉執行中的 agy
 
 agentswap 沒有伺服器、不用註冊、不收集任何使用資料。它對你的登入資料只做這些事：
 
-- **在你的電腦上**：已存帳號放在 `~/.agentswap`，用只有這台電腦的這個使用者才能解開的金鑰加密，金鑰交給系統保管：Windows 本身、macOS 的鑰匙圈、Linux 的 keyring。檔案複製到別台電腦也打不開。Linux 沒有 keyring 時，agentswap 會改用金鑰檔，並明確告訴你。
+- **在你的電腦上**：已存帳號放在 `~/.agentswap`，用只有這台電腦的這個使用者才能解開的金鑰加密，金鑰交給系統保管：Windows 本身、macOS 的鑰匙圈、Linux 的 keyring。檔案複製到別台電腦也打不開；要搬到別台電腦請用 `agentswap export`，以你設定的密碼加密。Linux 沒有 keyring 時，agentswap 會改用金鑰檔，並明確告訴你。
 - **在網路上**：每個 token 只會送到發給它的那家公司，用來查用量和維持登入：
 
   | Agent | 連線對象 |

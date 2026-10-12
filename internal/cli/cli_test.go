@@ -49,6 +49,16 @@ type harness struct {
 	stopped     []int
 	finds       int
 	interactive bool
+	secrets     []string
+}
+
+func (h *harness) secret() (string, error) {
+	if len(h.secrets) == 0 {
+		return "", io.EOF
+	}
+	s := h.secrets[0]
+	h.secrets = h.secrets[1:]
+	return s, nil
 }
 
 func (h *harness) Find(names, skip []string) ([]procs.Proc, error) {
@@ -169,6 +179,7 @@ func (h *harness) run(args ...string) (int, string, string) {
 		Exec:        h.exec,
 		Output:      h.output,
 		Stdin:       strings.NewReader(h.stdin),
+		Secret:      h.secret,
 		GOOS:        "linux",
 		Vault:       vault.WithKey(bytes.Repeat([]byte{9}, 32)),
 	})
@@ -932,7 +943,7 @@ func TestHelpIsSpecificToEachCommand(t *testing.T) {
 		args       []string
 		want, deny []string
 	}{
-		{[]string{"cxswap", "help"}, []string{"cxswap status [account]", "cxswap login [alias]", "cxswap <account>", "<account> is the number shown by `cxswap list`"}, []string{"import"}},
+		{[]string{"cxswap", "help"}, []string{"cxswap status [account]", "cxswap login [alias]", "cxswap <account>", "<account> is the number shown by `cxswap list`", "cxswap import <file>"}, []string{"another tool"}},
 		{[]string{"ccswap", "--help"}, []string{"ccswap status [account]", "ccswap import", "/login", "<account> is the number shown by `ccswap list`"}, []string{"ccswap login", "from cswap", "asks where"}},
 		{[]string{"agentswap", "help"}, []string{"agentswap claude <command>", "agentswap codex <command>", "agentswap link", "ccswap help"}, []string{"login [alias]"}},
 	}
@@ -1110,7 +1121,7 @@ func TestAntigravityLoginAndHelp(t *testing.T) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
 	}
-	if strings.Contains(out, "agswap login") || strings.Contains(out, "import") {
+	if strings.Contains(out, "agswap login") || strings.Contains(out, "another tool") {
 		t.Errorf("help %s", out)
 	}
 	if code, _, _ := h.run("agswap", "import"); code != 2 {

@@ -274,6 +274,26 @@ func (m *Manager) Status() (Status, error) {
 	return st, err
 }
 
+type Saved struct {
+	Account store.Account
+	Raw     []byte
+}
+
+func (m *Manager) Snapshots() ([]Saved, error) {
+	var out []Saved
+	err := m.withRegistry(false, func(r *store.Registry, l live) error {
+		for _, a := range r.Accounts {
+			raw, err := m.S.ReadSnapshot(a.Key)
+			if err != nil {
+				return fmt.Errorf("saved credentials for %s: %w", a.Email, err)
+			}
+			out = append(out, Saved{Account: a, Raw: raw})
+		}
+		return m.S.Save(r)
+	})
+	return out, err
+}
+
 func (m *Manager) Remove(q string) (store.Account, error) {
 	var out store.Account
 	err := m.withRegistry(false, func(r *store.Registry, l live) error {

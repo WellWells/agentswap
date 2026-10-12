@@ -146,6 +146,15 @@ agswap 2                 # offers to close running agy first
 
 To add another account, run `/logout` in agy, sign in to the other account and run `agswap add`. Logging out does not affect saved accounts. agy only picks up a new login when it starts, so `agswap` asks to close every running agy, `agy remote-control` included, and cancels the switch if you say no. The desktop app is not supported yet.
 
+### Another computer
+
+```sh
+agentswap export accounts.json   # asks for a passphrase twice
+agentswap import accounts.json   # on the other computer
+```
+
+The file is encrypted with your passphrase (at least 8 characters, not shown as you type). `cxswap export` and the other agent commands export just that agent. Accounts already saved on the other computer are skipped, and the account signed in there is left alone. Delete the file once it has been imported. Codex and Claude Code refresh tokens rotate, so using the same account on two computers at once may sign one of them out.
+
 ## Commands
 
 | Agent | Commands |
@@ -164,10 +173,13 @@ Every agent has the same commands. `<account>` is the number from `list`, an ali
 | `cxswap -` | switch back to the previous account |
 | `cxswap add [alias]` | save the account you are signed in to |
 | `cxswap login [alias]` | Codex only: sign in to another account and save it |
-| `ccswap import` | Claude Code only: import accounts from claude-swap |
+| `ccswap import` | Claude Code only: without a file, import accounts from claude-swap |
 | `cxswap alias <account> [name]` | set an alias, or clear it |
 | `cxswap rm <account>` | forget a saved account (it stays signed in) |
+| `cxswap export <file>` | save the accounts to a file encrypted with a passphrase; `--plain` writes it unencrypted after two confirmations |
+| `cxswap import <file>` | import accounts from an export file; accounts already saved are skipped |
 | `agentswap status` | all agents at once |
+| `agentswap export <file>`, `agentswap import <file>` | the same for all agents at once |
 | `agentswap lang [language]` | English (`en`), Traditional Chinese (`zh-TW`) or Simplified Chinese (`zh-CN`); `auto` follows the system |
 
 Run any command without arguments for its help.
@@ -184,7 +196,7 @@ Run any command without arguments for its help.
 
 agentswap has no server, no sign-up and no telemetry. Here is everything it does with your logins:
 
-- **On your computer**, saved accounts live in `~/.agentswap`, encrypted with a key that only your user on this computer can use, kept by the system: Windows itself, the Keychain on macOS, the keyring on Linux. Copied to another computer, they cannot be opened. On Linux without a keyring, agentswap uses a key file instead and tells you so.
+- **On your computer**, saved accounts live in `~/.agentswap`, encrypted with a key that only your user on this computer can use, kept by the system: Windows itself, the Keychain on macOS, the keyring on Linux. Copied to another computer, they cannot be opened; `agentswap export` moves them in a file encrypted with a passphrase you choose. On Linux without a keyring, agentswap uses a key file instead and tells you so.
 - **On the network**, each token goes only to the company that issued it, to read usage and keep the login fresh:
 
   | Agent | Hosts |
