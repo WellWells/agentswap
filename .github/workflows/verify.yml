@@ -54,7 +54,7 @@ jobs:
       VERSION: ${{ needs.dist.outputs.version }}
       AGENTSWAP_DOWNLOAD_URL: http://127.0.0.1:8765
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
@@ -73,7 +73,7 @@ jobs:
           if [ "$(uname -m)" = arm64 ]; then codesign -v "$bin/agentswap"; fi
           "$bin/agentswap" unlink
           test ! -e "$bin/cxswap"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: formula
       - env:
