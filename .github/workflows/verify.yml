@@ -16,8 +16,8 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - id: version
@@ -32,12 +32,12 @@ jobs:
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           mkdir -p brew
           go run ./tools/dist -version "$VERSION" -brew brew/agentswap.rb
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
           retention-days: 14
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: formula
           path: brew/agentswap.rb
@@ -54,7 +54,7 @@ jobs:
       VERSION: ${{ needs.dist.outputs.version }}
       AGENTSWAP_DOWNLOAD_URL: http://127.0.0.1:8765
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
@@ -73,7 +73,7 @@ jobs:
           if [ "$(uname -m)" = arm64 ]; then codesign -v "$bin/agentswap"; fi
           "$bin/agentswap" unlink
           test ! -e "$bin/cxswap"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: formula
       - env:
