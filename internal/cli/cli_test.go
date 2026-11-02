@@ -1210,3 +1210,83 @@ func TestClaudeSwitchSkipsDesktopApp(t *testing.T) {
 		t.Fatalf("%d %q %v", code, out, h.stopped)
 	}
 }
+
+func TestHelpFlagAfterCommandChangesNothing(t *testing.T) {
+	h := newHarness(t)
+	h.login("alice@x.com", "u1", "a1")
+	h.run("cxswap", "add")
+	h.login("bob@x.com", "u2", "a2")
+	h.exec = func(env []string, name string, args ...string) error {
+		t.Fatalf("ran %s %v", name, args)
+		return nil
+	}
+	for _, args := range [][]string{
+		{"add", "--help"}, {"add", "-h"}, {"login", "--help"}, {"alias", "1", "--help"}, {"remove", "1", "--help"},
+		{"switch", "--help"}, {"status", "-h"}, {"export", "--help"}, {"import", "--help"}, {"1", "--help"},
+	} {
+		code, out, errs := h.run(append([]string{"cxswap"}, args...)...)
+		if code != 0 || errs != "" || !strings.Contains(out, "cxswap login [alias]") {
+			t.Errorf("%v: code=%d out=%q err=%q", args, code, out, errs)
+		}
+	}
+	reg, _ := os.ReadFile(filepath.Join(h.home, ".agentswap", "codex", "registry.json"))
+	if !strings.Contains(string(reg), "u1") || strings.Contains(string(reg), "u2") || strings.Contains(string(reg), "help") || h.liveRefresh() != "rt-u2" {
+		t.Fatalf("state changed: live=%s registry=%s", h.liveRefresh(), reg)
+	}
+}
+
+func TestUnknownFlagAfterCommandIsRejected(t *testing.T) {
+	h := newHarness(t)
+	h.login("alice@x.com", "u1", "a1")
+	h.exec = func(env []string, name string, args ...string) error {
+		t.Fatalf("ran %s %v", name, args)
+		return nil
+	}
+	for _, args := range [][]string{
+		{"add", "--work"}, {"add", "-w"}, {"login", "--device-auth"}, {"alias", "1", "--work"}, {"remove", "--all"}, {"switch", "--force"}, {"status", "--json"},
+	} {
+		code, _, errs := h.run(append([]string{"cxswap"}, args...)...)
+		if flag := args[len(args)-1]; code != 2 || !strings.Contains(errs, "unknown flag "+flag) {
+			t.Errorf("%v: code=%d err=%q", args, code, errs)
+		}
+	}
+	if reg, err := os.ReadFile(filepath.Join(h.home, ".agentswap", "codex", "registry.json")); err == nil && strings.Contains(string(reg), "u1") {
+		t.Fatalf("account saved: %s", reg)
+	}
+}
+
+func TestHelpFlagAfterGlobalCommandChangesNothing(t *testing.T) {
+	h := newHarness(t)
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	dir := t.TempDir()
+	h.exe = filepath.Join(dir, "agentswap"+ext)
+	os.WriteFile(h.exe, []byte("bin"), 0o755)
+	if code, _, errs := h.run("agentswap", "link"); code != 0 {
+		t.Fatalf("link: %q", errs)
+	}
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"unlink", "--help"}, "agentswap link"},
+		{[]string{"link", "-h"}, "agentswap link"},
+		{[]string{"update", "--help"}, "agentswap link"},
+		{[]string{"status", "--help"}, "agentswap link"},
+		{[]string{"export", "--help"}, "agentswap link"},
+		{[]string{"import", "--help"}, "agentswap link"},
+		{[]string{"lang", "--help"}, "agentswap link"},
+		{[]string{"codex", "add", "--help"}, "login [alias]"},
+	}
+	for _, c := range cases {
+		code, out, errs := h.run(append([]string{"agentswap"}, c.args...)...)
+		if code != 0 || errs != "" || !strings.Contains(out, c.want) {
+			t.Errorf("%v: code=%d out=%q err=%q", c.args, code, out, errs)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cxswap"+ext)); err != nil {
+		t.Fatalf("links removed: %v", err)
+	}
+}

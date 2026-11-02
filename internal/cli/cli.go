@@ -209,6 +209,29 @@ func isNumber(s string) bool {
 func isHelp(s string) bool    { return s == "help" || s == "-h" || s == "--help" }
 func isVersion(s string) bool { return s == "version" || s == "--version" || s == "-v" }
 
+func isProvider(s string) bool {
+	_, ok := lookup(strings.ToLower(s))
+	return ok
+}
+
+func helpFlag(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+func flagArg(args []string) string {
+	for _, a := range args {
+		if len(a) > 1 && strings.HasPrefix(a, "-") {
+			return a
+		}
+	}
+	return ""
+}
+
 func Run(e Env) int {
 	prog := strings.ToLower(filepath.Base(strings.ReplaceAll(e.Args[0], `\`, "/")))
 	prog = strings.TrimSuffix(prog, ".exe")
@@ -239,7 +262,7 @@ func run(e Env, prog string, args []string) int {
 	name, ok := lookup(prog)
 	if !ok {
 		switch {
-		case len(args) == 0 || isHelp(args[0]):
+		case len(args) == 0 || isHelp(args[0]) || helpFlag(args[1:]) && !isProvider(args[0]):
 			fmt.Fprint(e.Stdout, e.usage("agentswap <provider>"))
 			return 0
 		case isVersion(args[0]):
@@ -370,9 +393,11 @@ func dispatch(e Env, prog string, p provider, m *swap.Manager, args []string) er
 		return nil
 	}
 	switch {
-	case cmd == "" || isHelp(cmd):
+	case cmd == "" || isHelp(cmd) || helpFlag(args):
 		fmt.Fprint(e.Stdout, e.usageFor(p, prog))
 		return nil
+	case cmd != "export" && cmd != "import" && flagArg(args) != "":
+		return usageError(l.T("unknownFlag", flagArg(args)))
 	case cmd == "list" || cmd == "ls":
 		return list(e, prog, p, m)
 	case cmd == "status" || cmd == "current" || cmd == "usage":
