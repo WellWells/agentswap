@@ -481,7 +481,7 @@ func TestStatusIncludesUnsavedLoginWithSavedAccounts(t *testing.T) {
 	h.usage["at-u3"] = plusUsage
 	h.login("carol@x.com", "u3", "a3")
 	_, out, _ := h.run("cxswap", "status")
-	if !hasLine(out, "#1 <alice@x.com>") || !hasLine(out, "#2 <bob@x.com>") || !hasLine(out, "<carol@x.com>", "42%", "● active  not saved, run `cxswap add`") {
+	if !hasLine(out, "#1 <alice@x.com>") || !hasLine(out, "#2 <bob@x.com>") || !hasLine(out, "<carol@x.com>", "42%") || !hasLine(out, "● active  not saved, run `cxswap add`") {
 		t.Fatalf("%s", out)
 	}
 }

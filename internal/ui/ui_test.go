@@ -389,11 +389,156 @@ func TestRenderTableFitsNarrowTerminal(t *testing.T) {
 	if !strings.Contains(out, "#2 work <boss@x.com> · …  ") {
 		t.Errorf("account column not shortened to 24:\n%s", out)
 	}
-	if strings.Contains(out, "Oct 14") || strings.Contains(out, "Times show") {
-		t.Errorf("reset times kept although they do not fit:\n%s", out)
+	for _, want := range []string{"   Weekly limit  Oct 14 5:41pm", "   5-hour limit  1:20pm  Weekly limit  Oct 15 9:12am", "Times show when each limit resets (UTC+8)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing reset detail %q:\n%s", want, out)
+		}
 	}
 	if !strings.Contains(out, "76%") || !strings.Contains(out, "★ suggested: cxswap 2") {
 		t.Errorf("usage or tags dropped:\n%s", out)
+	}
+}
+
+func overviewCards(now time.Time) []Card {
+	win := func(pct, minutes int, label string) swap.Window {
+		return swap.Window{UsedPercent: pct, Minutes: minutes, Label: label, ResetsAt: now.Add(time.Duration(minutes) * time.Minute)}
+	}
+	usage := func(ws ...swap.Window) swap.Usage { return swap.Usage{Live: true, Windows: ws} }
+	return []Card{
+		{Provider: "Codex", Number: 1, Email: "jora93721@gmail.com", Plan: "plus", Usage: usage(win(80, 10080, ""))},
+		{Provider: "Codex", Number: 2, Email: "boss@duck.com", Plan: "plus", Suggest: "agentswap codex 2", Usage: usage(win(0, 300, ""), win(0, 10080, ""))},
+		{Provider: "Codex", Number: 3, Email: "tsoda001+gp1@gmail.com", Plan: "plus", Active: true, Usage: usage(win(1, 10080, ""))},
+		{Provider: "Claude Code", Number: 1, Email: "tsoda001@gmail.com", Plan: "max", Usage: usage(win(9, 300, ""), win(21, 10080, ""), win(5, 10080, "Fable"))},
+		{Provider: "Claude Code", Number: 2, Email: "m41701165@gmail.com", Plan: "max", Active: true, Usage: usage(win(8, 300, ""), win(7, 10080, ""), win(0, 10080, "Fable"))},
+		{Provider: "Antigravity", Number: 1, Email: "dan50907@gmail.com", Usage: usage(win(0, 300, ""), win(0, 10080, ""), win(0, 300, "Claude and GPT"), win(0, 10080, "Claude and GPT"))},
+		{Provider: "Antigravity", Number: 2, Email: "wells@signalpro.com.tw", Active: true, Usage: usage(win(0, 10080, ""), win(0, 10080, "Claude and GPT"))},
+	}
+}
+
+func TestRenderOverviewFitsNarrowTerminal(t *testing.T) {
+	now := at(10, 8, 10, 0)
+	for _, l := range Langs {
+		for _, width := range []int{120, 100, 88, 80} {
+			var buf bytes.Buffer
+			Render(&buf, overviewCards(now), Options{Lang: l, Width: width, Color: true, Now: now})
+			out := buf.String()
+			for _, line := range strings.Split(out, "\n") {
+				if visibleWidth(line) > width {
+					t.Errorf("lang %d width %d: line is %d wide: %q\n%s", l, width, visibleWidth(line), line, out)
+				}
+			}
+			for _, want := range []string{l.T("active"), l.T("suggest", "agentswap codex 2"), "80%", "21%"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("lang %d width %d: missing %q in:\n%s", l, width, want, out)
+				}
+			}
+		}
+	}
+}
+
+func TestRenderOverviewSplitsLabeledHeads(t *testing.T) {
+	now := at(10, 8, 10, 0)
+	var buf bytes.Buffer
+	Render(&buf, overviewCards(now), Options{Lang: ZhTW, Width: 88, Now: now})
+	lines := strings.Split(buf.String(), "\n")
+	var heads []int
+	for i, line := range lines {
+		if strings.HasPrefix(line, "帳號") {
+			heads = append(heads, i)
+		}
+	}
+	if len(heads) != 3 {
+		t.Fatalf("want 3 headers:\n%s", buf.String())
+	}
+	agy := lines[heads[2]]
+	if strings.Contains(agy, "Claude and GPT") || strings.Count(agy, "5 小時額度") != 2 || strings.Count(agy, "本週額度") != 2 {
+		t.Errorf("labeled heads not split:\n%s", buf.String())
+	}
+	label := lines[heads[2]+1]
+	if strings.Count(label, "Claude and GPT") != 2 || displayWidth(label[:strings.Index(label, "Claude and GPT")]) != displayWidth(agy[:strings.LastIndex(agy, "5 小時額度")]) {
+		t.Errorf("label line not under its column:\n%s", buf.String())
+	}
+	for _, line := range lines {
+		if strings.Contains(line, "boss@duck.com") && !strings.Contains(line, "★ 建議：agentswap codex 2") {
+			t.Errorf("suggestion should stay on the Codex row:\n%s", buf.String())
+		}
+		if strings.Contains(line, "m41701165") && !strings.Contains(line, "● 使用中") {
+			t.Errorf("active tag should stay on the Claude row:\n%s", buf.String())
+		}
+	}
+	if !slices.Contains(lines, strings.Repeat(" ", tagIndent)+"● 使用中") {
+		t.Errorf("Antigravity tag should move to its own line:\n%s", buf.String())
+	}
+}
+
+func TestRenderOverviewKeepsResetTimes(t *testing.T) {
+	now := at(10, 8, 10, 0)
+	for _, l := range Langs {
+		for _, width := range []int{80, 88, 100, 120, 240} {
+			for _, color := range []bool{false, true} {
+				var buf bytes.Buffer
+				cards := overviewCards(now)
+				Render(&buf, cards, Options{Lang: l, Width: width, Color: color, Now: now})
+				out := buf.String()
+				pos := 0
+				for _, c := range cards {
+					start := strings.Index(out[pos:], "#"+strconv.Itoa(c.Number)+" ")
+					if start < 0 {
+						t.Fatalf("missing account %s #%d:\n%s", c.Provider, c.Number, out)
+					}
+					pos += start
+					end := strings.Index(out[pos+1:], "#")
+					section := out[pos:]
+					if end >= 0 {
+						section = out[pos : pos+1+end]
+					}
+					for _, win := range c.Usage.Windows {
+						when := ResetTime(l, win.ResetsAt, now)
+						if !strings.Contains(section, when) {
+							t.Errorf("lang %d width %d color %v: %s #%d missing %q:\n%s", l, width, color, c.Provider, c.Number, when, out)
+						}
+					}
+					pos++
+				}
+				if !strings.Contains(out, l.T("zoneNote", "UTC+8")) {
+					t.Errorf("missing reset time zone:\n%s", out)
+				}
+			}
+		}
+	}
+}
+
+func TestRenderCompactSkipsUnknownAndExpiredResetTimes(t *testing.T) {
+	now := at(10, 8, 10, 0)
+	cards := overviewCards(now)
+	for i := range cards {
+		for j := range cards[i].Usage.Windows {
+			cards[i].Usage.Windows[j].ResetsAt = time.Time{}
+		}
+	}
+	cards[0].Usage.Windows[0].ResetsAt = now.Add(-time.Hour)
+	cards[1].Usage.Windows[0].ResetsAt = now
+	cards[2].State = LoginExpired
+	cards[2].Usage.Windows[0].ResetsAt = now.Add(time.Hour)
+	var buf bytes.Buffer
+	Render(&buf, cards, Options{Lang: En, Width: 80, Now: now})
+	if out := buf.String(); strings.Contains(out, "Times show") || strings.Contains(out, "11am") || strings.Contains(out, "9am") || strings.Contains(out, "10am") {
+		t.Errorf("unexpected reset time:\n%s", out)
+	}
+}
+
+func TestRenderCompactShowsResetOncePerColumn(t *testing.T) {
+	now := at(10, 8, 10, 0)
+	cards := overviewCards(now)
+	cards[0].Usage.Windows = append(cards[0].Usage.Windows, cards[0].Usage.Windows...)
+	var buf bytes.Buffer
+	Render(&buf, cards, Options{Lang: En, Width: 80, Now: now})
+	out := buf.String()
+	start := strings.Index(out, "#1 ")
+	end := strings.Index(out[start:], "#2 ")
+	when := ResetTime(En, cards[0].Usage.Windows[0].ResetsAt, now)
+	if count := strings.Count(out[start:start+end], when); count != 1 {
+		t.Errorf("reset time shown %d times:\n%s", count, out)
 	}
 }
 
