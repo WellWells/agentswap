@@ -46,6 +46,11 @@ func (m *memKeyring) Write(b []byte) error {
 	return nil
 }
 
+func (m *memKeyring) Delete([]byte) error {
+	m.b = nil
+	return nil
+}
+
 func TestIdentify(t *testing.T) {
 	id, err := Identify(blob("111", "a@gmail.com", "at", "rt", future))
 	if err != nil {

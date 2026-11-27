@@ -29,8 +29,8 @@ const (
 )
 
 var (
-	ErrNoUsage      = errors.New("usage is only available for ChatGPT logins")
-	ErrLoginExpired = errors.New("login expired; log in to this account again")
+	ErrNoUsage      = swap.ErrUsageUnsupported
+	ErrLoginExpired = fmt.Errorf("%w; log in to this account again", swap.ErrUsageLoginExpired)
 )
 
 type httpError int
@@ -116,6 +116,10 @@ func usageURL(base string) string {
 }
 
 func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usage, []byte, error) {
+	return p.UsageWithRefresh(ctx, snap, active, nil)
+}
+
+func (p Provider) UsageWithRefresh(ctx context.Context, snap []byte, active bool, save func([]byte) error) (swap.Usage, []byte, error) {
 	c, err := parseCreds(snap)
 	if err != nil {
 		return swap.Usage{}, nil, err
@@ -126,6 +130,11 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 		b, err := p.refreshTokens(ctx, snap, c.refresh)
 		if err != nil {
 			return err
+		}
+		if save != nil && !active {
+			if err := save(b); err != nil {
+				return err
+			}
 		}
 		refreshed, snap = b, b
 		c, err = parseCreds(b)
@@ -149,6 +158,9 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 	}
 	if err != nil {
 		if su, ok := p.sessionUsage(c.user, c.account); ok {
+			if errors.Is(err, swap.ErrRateLimited) {
+				return su, refreshed, err
+			}
 			return su, refreshed, nil
 		}
 		return swap.Usage{}, refreshed, err
@@ -192,13 +204,13 @@ func (p Provider) expiresSoon(access string) bool {
 }
 
 type apiWindow struct {
-	UsedPercent        float64 `json:"used_percent"`
-	LimitWindowSeconds int64   `json:"limit_window_seconds"`
-	ResetAt            int64   `json:"reset_at"`
+	UsedPercent        *float64 `json:"used_percent"`
+	LimitWindowSeconds int64    `json:"limit_window_seconds"`
+	ResetAt            int64    `json:"reset_at"`
 }
 
 func (w *apiWindow) window() swap.Window {
-	out := swap.Window{UsedPercent: int(math.Round(w.UsedPercent)), Minutes: int(w.LimitWindowSeconds / 60)}
+	out := swap.Window{UsedPercent: int(math.Round(*w.UsedPercent)), Minutes: int(w.LimitWindowSeconds / 60)}
 	if w.ResetAt > 0 {
 		out.ResetsAt = time.Unix(w.ResetAt, 0)
 	}
@@ -220,6 +232,9 @@ func (p Provider) fetchUsage(ctx context.Context, c creds, base string) (swap.Us
 		return swap.Usage{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return swap.Usage{}, swap.RateLimit(resp.Header.Get("Retry-After"), p.now())
+	}
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, resp.Body)
 		return swap.Usage{}, httpError(resp.StatusCode)
@@ -237,7 +252,7 @@ func (p Provider) fetchUsage(ctx context.Context, c creds, base string) (swap.Us
 	u := swap.Usage{Plan: r.PlanType, At: p.now(), Live: true}
 	if r.RateLimit != nil {
 		for _, w := range []*apiWindow{r.RateLimit.Primary, r.RateLimit.Secondary} {
-			if w != nil {
+			if w != nil && w.UsedPercent != nil {
 				u.Windows = append(u.Windows, w.window())
 			}
 		}
@@ -262,6 +277,9 @@ func (p Provider) refreshTokens(ctx context.Context, snap []byte, refreshToken s
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, swap.RateLimit(resp.Header.Get("Retry-After"), p.now())
+	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, err
@@ -304,9 +322,9 @@ func deadRefresh(body string) bool {
 }
 
 type sessionWindow struct {
-	UsedPercent   float64 `json:"used_percent"`
-	WindowMinutes int     `json:"window_minutes"`
-	ResetsAt      int64   `json:"resets_at"`
+	UsedPercent   *float64 `json:"used_percent"`
+	WindowMinutes int      `json:"window_minutes"`
+	ResetsAt      int64    `json:"resets_at"`
 }
 
 func (p Provider) sessionUsage(user, account string) (swap.Usage, bool) {
@@ -378,10 +396,10 @@ func sessionFileUsage(path, user, account string) (swap.Usage, bool) {
 	rl := ev.Payload.RateLimits
 	u := swap.Usage{Plan: rl.PlanType, At: ev.Timestamp}
 	for _, w := range []*sessionWindow{rl.Primary, rl.Secondary} {
-		if w == nil {
+		if w == nil || w.UsedPercent == nil {
 			continue
 		}
-		win := swap.Window{UsedPercent: int(math.Round(w.UsedPercent)), Minutes: w.WindowMinutes}
+		win := swap.Window{UsedPercent: int(math.Round(*w.UsedPercent)), Minutes: w.WindowMinutes}
 		if w.ResetsAt > 0 {
 			win.ResetsAt = time.Unix(w.ResetsAt, 0)
 		}

@@ -53,10 +53,18 @@ func (k keychain) Read() ([]byte, error) {
 	return decodeValue(bytes.TrimSuffix(out, []byte("\n")))
 }
 
-func (k keychain) Write(b []byte) error {
+func keychainWriteCommand(b []byte) (string, error) {
 	line := fmt.Sprintf("add-generic-password -U -s %s -a %s -w %s%s\n", service, user, prefixBase64, base64.StdEncoding.EncodeToString(b))
 	if len(line) > maxCommand {
-		return fmt.Errorf("credentials are too large to write to the keychain safely (%d bytes)", len(b))
+		return "", fmt.Errorf("credentials are too large to write to the keychain safely (%d bytes)", len(b))
+	}
+	return line, nil
+}
+
+func (k keychain) Write(b []byte) error {
+	line, err := keychainWriteCommand(b)
+	if err != nil {
+		return err
 	}
 	_, code, err := k.security([]byte(line), "-i")
 	if err != nil {
@@ -64,6 +72,20 @@ func (k keychain) Write(b []byte) error {
 	}
 	if code != 0 {
 		return fmt.Errorf("security add-generic-password: exit %d", code)
+	}
+	return nil
+}
+
+func (k keychain) Delete(current []byte) error {
+	if _, err := keychainWriteCommand(current); err != nil {
+		return err
+	}
+	_, code, err := k.security(nil, "delete-generic-password", "-s", service, "-a", user)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("security delete-generic-password: exit %d", code)
 	}
 	return nil
 }
@@ -88,6 +110,17 @@ func (s secretTool) Write(b []byte) error {
 	}
 	if code != 0 {
 		return fmt.Errorf("secret-tool store: exit %d", code)
+	}
+	return nil
+}
+
+func (s secretTool) Delete([]byte) error {
+	_, code, err := runner(s.run)(nil, "secret-tool", "clear", "service", service, "username", user)
+	if err != nil {
+		return fmt.Errorf("secret-tool clear: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("secret-tool clear: exit %d", code)
 	}
 	return nil
 }

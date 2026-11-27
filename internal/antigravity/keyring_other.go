@@ -12,4 +12,6 @@ func (winCred) Read() ([]byte, error) { return nil, errNoCredManager }
 
 func (winCred) Write([]byte) error { return errNoCredManager }
 
+func (winCred) Delete([]byte) error { return errNoCredManager }
+
 func processRunning(string) (bool, error) { return false, nil }

@@ -8,9 +8,9 @@
 
 快速、轻巧、隐私优先的账号切换工具，支持 Codex、Claude Code 和 Antigravity CLI。
 
-有好几个订阅时，把登录文件复制来复制去撑不了几天：保存的那份很快就过期，重新登录又会把原来在用的账号登出。agentswap 让每个已保存的账号都保持登录，显示每个账号的额度还剩多少，一条命令切换。只换登录，agent 的其他配置都不动。token 只留在你的电脑上，加密保存。
+有好几个订阅时，把登录文件复制来复制去撑不了几天：保存的那份很快就过期，重新登录又会把原来在用的账号登出。agentswap 让每个已保存的账号都保持登录，显示每个账号已用多少额度、何时重置，一条命令切换。只换登录，agent 的其他配置都不动。agentswap 会在这台电脑上加密保存账号快照。
 
-![agentswap status：Codex、Claude Code、Antigravity 每个已保存账号的 5 小时与每周额度](docs/agentswap-status.zh-CN.png)
+![agentswap status：Codex、Claude Code、Antigravity 每个已保存账号的 5 小时与每周已用额度](docs/agentswap-status.zh-CN.png)
 
 一个小程序，支持 macOS、Linux、Windows。不用另外安装任何东西，也不常驻后台。
 
@@ -89,6 +89,8 @@ secret-tool clear service agentswap key vault                # Linux
 
 ## 快速上手
 
+运行 `agentswap login` 可选择要登录的工具，也可以直接指定，例如 `agentswap login claude work`。
+
 ### Codex
 
 ```sh
@@ -114,17 +116,20 @@ cxswap 2                 # 切换到 #2
 cxswap -                 # 再切回来
 ```
 
-切换后请重启 Codex；如果 Codex 还在运行，`cxswap` 会询问是否帮你关闭。账号保存之后，请用 `cxswap login` 添加账号，不要用 `codex login` 或 `codex logout`，这两个命令会把当前在用的账号登出。Codex 设置为把登录信息存在系统钥匙串时，目前还不支持。
+切换后请重启 Codex；如果 Codex 还在运行，`cxswap` 会询问是否帮你关闭。Codex 设置为把登录信息存在系统钥匙串时，目前还不支持。
+
+用 `cxswap login` 添加账号时，Codex 会在临时目录登录。直接运行 `codex login`、`codex logout`，或在 Codex 内输入 `/logout`，可能撤销当前 ChatGPT 登录的刷新令牌（refresh token）。已保存的同一份令牌也会失效，需要用 `cxswap login` 重新登录该账号。API key 仍然有效。
 
 ### Claude Code
 
 ```sh
 ccswap add work          # 保存当前登录的账号
+ccswap login personal    # 登录并保存另一个订阅账号
 ccswap status
 ccswap 2                 # 运行中的会话会在下一个请求改用新账号
 ```
 
-其他账号请在 Claude Code 里用 `/login` 登录，再运行 `ccswap add`。切换只换登录，你的配置和 MCP 服务器都不会动。只支持 Claude 订阅登录，不支持 API key。
+`ccswap login` 会在临时配置目录运行官方 `claude auth login`，登录完成后自动保存账号。当前打开的 Claude Code 会继续使用原账号。切换只换登录，你的配置和 MCP 服务器都不会动。只支持 Claude 订阅登录，不支持 API key。
 
 从 claude-swap 迁移过来：
 
@@ -140,11 +145,12 @@ cswap purge              # 再移除 claude-swap 留下的副本
 
 ```sh
 agswap add work          # 保存当前登录的账号
+agswap login personal    # 登录、保存并使用另一个账号
 agswap list
 agswap 2                 # 会先询问是否关闭运行中的 agy
 ```
 
-要添加账号，在 agy 里运行 `/logout`，登录另一个账号后再运行 `agswap add`。退出登录不会影响已保存的账号。agy 只在启动时读取登录信息，所以 `agswap` 会询问是否关闭所有运行中的 agy（包括 `agy remote-control`），选否就取消切换。桌面版目前还不支持。
+`agswap login` 会先保存原账号，再清除系统钥匙串中当前的 agy 登录，让 agy 直接进入登录流程。如果未完成登录就退出，会恢复原账号。完成后按 Ctrl+D 退出，新账号会自动保存并成为当前账号。要切回原账号可用 `agswap -`。此流程适用于将登录信息保存在系统钥匙串的 agy。agy 只在启动时读取登录信息，所以 `agswap` 会询问是否关闭所有运行中的 agy（包括 `agy remote-control`），选否就取消切换。桌面版目前还不支持。
 
 ### 换到另一台电脑
 
@@ -172,7 +178,7 @@ agentswap import accounts.json   # 在另一台电脑上运行
 | `cxswap <account>` | 切换（也可以写 `cxswap switch <account>`）；加 `--yes` 不询问直接关闭运行中的会话 |
 | `cxswap -` | 切回上一个账号 |
 | `cxswap add [alias]` | 保存当前登录的账号 |
-| `cxswap login [alias]` | 仅 Codex：登录另一个账号并保存 |
+| `agentswap login [agent] [alias]` | 通过官方 CLI 登录并保存账号 |
 | `ccswap import` | 仅 Claude Code：不指定文件时，从 claude-swap 导入账号 |
 | `cxswap alias <account> [name]` | 设置别名，不给名称则清除 |
 | `cxswap rm <account>` | 移除已保存的账号（不会退出登录） |
@@ -192,12 +198,24 @@ agentswap import accounts.json   # 在另一台电脑上运行
 | `AGENTSWAP_NO_UPDATE_CHECK` | 设置任意值即不检查新版本 |
 | `NO_COLOR` | 不输出颜色 |
 
+## 独立终端与脚本
+
+`ccswap run work` 让当前终端使用已保存的 `work` 账号。首次需要用同一 Claude 账号登录，以后可以复用。Claude 会为它保存独立的登录、设置和对话记录。`--` 后的参数传给 Claude，例如 `ccswap run work -- --resume`。
+
+在项目中执行 `ccswap map work .`，以后从子目录运行 `ccswap run` 会选用最近一级目录指定的账号。`ccswap map` 列出映射，`ccswap unmap .` 删除一条。目录未指定账号时会照常启动 Claude。映射和独立配置仅保存在本机。删除账号前，如需退出独立配置的登录，可运行 `ccswap run work -- auth logout`。
+
+- `agentswap status --json` 输出版本 1 的 JSON。`providers` 包含各服务的账号、读数状态与来源、观测时间、各个时段和模型的额度，以及适用时的推荐。单个服务失败时返回非零退出码，其余服务的结果仍可读取。`cxswap list --json` 只列出账号资料。
+- `agentswap status --cached --json` 只读本机用量，不连接服务商或刷新凭据。脚本可通过 `observedAt`、`status` 和 `retryAt` 查看测量时间及何时能重试。查询被限流时仍可查看上次读数，过期数据不参与推荐。
+- `ccswap status --model Fable` 按指定模型和通用额度推荐账号，缺少该模型的读数时保留为未知。
+- `ccswap repair work backup.json` 从 agentswap 导出文件中修复一个已保存的登录。请先切换到另一账号。修复 Claude 登录时会向 Anthropic 核对账号和组织，随后可自行切回。首次离线保存的 Claude 登录会标记为“待验证”，联网核对账号和组织后才能用于切换。
+
 ## 隐私
 
 agentswap 没有服务器、无需注册、不收集任何使用数据。它对你的登录信息只做这些事：
 
 - **在你的电脑上**：已保存的账号放在 `~/.agentswap`，用只有这台电脑的这个用户才能解开的密钥加密，密钥交给系统保管：Windows 本身、macOS 的钥匙串、Linux 的 keyring。文件复制到别的电脑也打不开；要迁移到别的电脑请用 `agentswap export`，以你设置的密码加密。Linux 没有 keyring 时，agentswap 会改用密钥文件，并明确告诉你。
-- **在网络上**：每个 token 只会发往签发它的那家公司，用来查询用量和保持登录：
+- `ccswap run` 的独立登录由 Claude Code 通过平台原生方式保存。本地用量缓存只保存额度、时间及错误代码，不含 token。
+- 每个 token 只会发给签发它的服务商，用于查询用量、续期或核对 Claude 账号和所属组织。连接对象如下。
 
   | Agent | 连接对象 |
   |---|---|

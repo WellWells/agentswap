@@ -118,7 +118,7 @@ func TestMessagesExistInEveryLanguage(t *testing.T) {
 			}
 		}
 	}
-	if ZhCN.T("week") != "本周额度" {
+	if ZhCN.T("week") != "本周已用" {
 		t.Fatalf("got %q", ZhCN.T("week"))
 	}
 	if En.T("zoneNote", "UTC+8") != "Times show when each limit resets (UTC+8)" || ZhTW.T("zoneNote", "UTC+8") != "時間為各額度的重置時間（UTC+8）" {
@@ -219,12 +219,12 @@ func TestAgo(t *testing.T) {
 
 func TestWindowName(t *testing.T) {
 	cases := map[int][2]string{
-		300:   {"5-hour limit", "5 小時額度"},
-		60:    {"1-hour limit", "1 小時額度"},
-		1440:  {"1-day limit", "1 天額度"},
-		10080: {"Weekly limit", "本週額度"},
-		4320:  {"3-day limit", "3 天額度"},
-		90:    {"90-minute limit", "90 分鐘額度"},
+		300:   {"Used (5h)", "5 小時已用"},
+		60:    {"Used (1h)", "1 小時已用"},
+		1440:  {"Used (1d)", "1 天已用"},
+		10080: {"Used (week)", "本週已用"},
+		4320:  {"Used (3d)", "3 天已用"},
+		90:    {"Used (90m)", "90 分鐘已用"},
 	}
 	for m, want := range cases {
 		if En.WindowName(m) != want[0] || ZhTW.WindowName(m) != want[1] {
@@ -257,19 +257,21 @@ func TestRenderTable(t *testing.T) {
 	var buf bytes.Buffer
 	Render(&buf, cards, Options{Lang: En, Width: 140, Now: now})
 	body := []string{
-		"Account                         5-hour limit           Weekly limit",
-		"#1 main <jora@x.com> · prolite  —                      ██████▏░  76%  Oct 14 5:41pm  ● active",
-		"#2 work <boss@x.com> · plus     ███▍░░░░  42%  1:20pm  ▊░░░░░░░  10%  Oct 15 9:12am  ★ suggested: cxswap 2",
-		"#3 <old@x.com>                  Login expired, log in to this account again",
-		"#4 <cache@x.com>                ▍░░░░░░░   5%          —                             From local session log · 3h ago",
-		"#5 <key@x.com>                  No usage data for API key logins",
-		"#6 <down@x.com>                 Usage unavailable (HTTP 500)",
+		"Status   Account                         Used (5h)      Used (week)",
+		"● active #1 main <jora@x.com> · prolite  —              ██████▏░  76%",
+		"                                                        Oct 14 5:41pm",
+		"         #2 work <boss@x.com> · plus     ███▍░░░░  42%  ▊░░░░░░░  10%  ★ suggested: cxswap 2",
+		"                                         1:20pm         Oct 15 9:12am",
+		"         #3 <old@x.com>                  Login expired, log in to this account again",
+		"         #4 <cache@x.com>                ▍░░░░░░░   5%  —              From local session log · 3h ago",
+		"         #5 <key@x.com>                  No usage data for API key logins",
+		"         #6 <down@x.com>                 Usage unavailable (HTTP 500)",
 	}
 	width := 0
 	for _, line := range body {
 		width = max(width, displayWidth(line))
 	}
-	want := "Codex " + strings.Repeat("─", width-6) + "\n" + strings.Join(body, "\n") + "\n" + strings.Repeat("─", width) + "\nTimes show when each limit resets (UTC+8)\n"
+	want := "Codex " + strings.Repeat("─", width-6) + "\n" + strings.Join(body, "\n") + "\n" + strings.Repeat("─", width) + "\nTimes show when each limit resets (UTC+8)\n— means no data for that limit\n"
 	if buf.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", buf.String(), want)
 	}
@@ -293,23 +295,23 @@ func TestRenderAlignsProviders(t *testing.T) {
 	lines := strings.Split(buf.String(), "\n")
 	var heads []string
 	for _, line := range lines {
-		if strings.HasPrefix(line, "Account") {
+		if strings.HasPrefix(line, "Status") {
 			heads = append(heads, line)
 		}
 	}
 	if len(heads) != 2 {
 		t.Fatalf("want 2 headers:\n%s", buf.String())
 	}
-	for _, name := range []string{"5-hour limit", "Weekly limit"} {
+	for _, name := range []string{"Used (5h)", "Used (week)"} {
 		a, b := strings.Index(heads[0], name), strings.Index(heads[1], name)
 		if a < 0 || a != b {
 			t.Errorf("%s at %d and %d:\n%s", name, a, b, buf.String())
 		}
 	}
-	if !strings.Contains(heads[0], "Weekly limit (Fable)") || strings.Contains(heads[1], "Fable") {
+	if !strings.Contains(heads[0], "Used (week) (Fable)") || strings.Contains(heads[1], "Fable") {
 		t.Errorf("Fable column:\n%s", buf.String())
 	}
-	if strings.Index(heads[0], "5-hour") > strings.Index(heads[0], "Weekly limit") {
+	if strings.Index(heads[0], "Used (5h)") > strings.Index(heads[0], "Used (week)") {
 		t.Errorf("5-hour column should come first:\n%s", buf.String())
 	}
 }
@@ -337,7 +339,7 @@ func TestRenderLabeledColumnsAfterPlain(t *testing.T) {
 	Render(&buf, cards, Options{Lang: En, Width: 200, Now: now})
 	var heads []string
 	for _, line := range strings.Split(buf.String(), "\n") {
-		if strings.HasPrefix(line, "Account") {
+		if strings.HasPrefix(line, "Status") {
 			heads = append(heads, line)
 		}
 	}
@@ -346,21 +348,21 @@ func TestRenderLabeledColumnsAfterPlain(t *testing.T) {
 	}
 	h := heads[2]
 	order := []int{
-		strings.Index(h, "5-hour limit  "),
-		strings.Index(h, "Weekly limit  "),
-		strings.Index(h, "5-hour limit (Claude and GPT)"),
-		strings.Index(h, "Weekly limit (Claude and GPT)"),
+		strings.Index(h, "Used (5h)  "),
+		strings.Index(h, "Used (week)  "),
+		strings.Index(h, "Used (5h) (Claude and GPT)"),
+		strings.Index(h, "Used (week) (Claude and GPT)"),
 	}
 	if order[0] < 0 || !slices.IsSorted(order) {
 		t.Errorf("column order %v:\n%s", order, buf.String())
 	}
-	if a := strings.Index(heads[0], "Weekly limit"); a != order[1] {
-		t.Errorf("Weekly limit at %d and %d:\n%s", a, order[1], buf.String())
+	if a := strings.Index(heads[0], "Used (week)"); a != order[1] {
+		t.Errorf("Used (week) at %d and %d:\n%s", a, order[1], buf.String())
 	}
 	if strings.Contains(heads[0], "Claude and GPT") || strings.Contains(heads[1], "Claude and GPT") {
 		t.Errorf("labeled heads leak into other providers:\n%s", buf.String())
 	}
-	if a := strings.Index(heads[1], "Weekly limit (Fable)"); a != order[2] {
+	if a := strings.Index(heads[1], "Used (week) (Fable)"); a != order[2] {
 		t.Errorf("Fable at %d, first labeled column at %d:\n%s", a, order[2], buf.String())
 	}
 	var active []int
@@ -386,10 +388,10 @@ func TestRenderTableFitsNarrowTerminal(t *testing.T) {
 			t.Errorf("line wider than 80: %q", line)
 		}
 	}
-	if !strings.Contains(out, "#2 work <boss@x.com> · …  ") {
-		t.Errorf("account column not shortened to 24:\n%s", out)
+	if !strings.Contains(out, "#2 work <boss@x.com> · plus") {
+		t.Errorf("account shortened despite space to wrap its suggestion:\n%s", out)
 	}
-	for _, want := range []string{"   Weekly limit  Oct 14 5:41pm", "   5-hour limit  1:20pm  Weekly limit  Oct 15 9:12am", "Times show when each limit resets (UTC+8)"} {
+	for _, want := range []string{"   Oct 14 5:41pm", "   1:20pm         Oct 15 9:12am", "Times show when each limit resets (UTC+8)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing reset detail %q:\n%s", want, out)
 		}
@@ -443,7 +445,7 @@ func TestRenderOverviewSplitsLabeledHeads(t *testing.T) {
 	lines := strings.Split(buf.String(), "\n")
 	var heads []int
 	for i, line := range lines {
-		if strings.HasPrefix(line, "帳號") {
+		if strings.HasPrefix(line, "狀態") {
 			heads = append(heads, i)
 		}
 	}
@@ -451,11 +453,11 @@ func TestRenderOverviewSplitsLabeledHeads(t *testing.T) {
 		t.Fatalf("want 3 headers:\n%s", buf.String())
 	}
 	agy := lines[heads[2]]
-	if strings.Contains(agy, "Claude and GPT") || strings.Count(agy, "5 小時額度") != 2 || strings.Count(agy, "本週額度") != 2 {
+	if strings.Contains(agy, "Claude and GPT") || strings.Count(agy, "5 小時已用") != 2 || strings.Count(agy, "本週已用") != 2 {
 		t.Errorf("labeled heads not split:\n%s", buf.String())
 	}
 	label := lines[heads[2]+1]
-	if strings.Count(label, "Claude and GPT") != 2 || displayWidth(label[:strings.Index(label, "Claude and GPT")]) != displayWidth(agy[:strings.LastIndex(agy, "5 小時額度")]) {
+	if strings.Count(label, "Claude and GPT") != 2 || displayWidth(label[:strings.Index(label, "Claude and GPT")]) != displayWidth(agy[:strings.LastIndex(agy, "5 小時已用")]) {
 		t.Errorf("label line not under its column:\n%s", buf.String())
 	}
 	for _, line := range lines {
@@ -466,8 +468,8 @@ func TestRenderOverviewSplitsLabeledHeads(t *testing.T) {
 			t.Errorf("active tag should stay on the Claude row:\n%s", buf.String())
 		}
 	}
-	if !slices.Contains(lines, strings.Repeat(" ", tagIndent)+"● 使用中") {
-		t.Errorf("Antigravity tag should move to its own line:\n%s", buf.String())
+	if !strings.Contains(strings.Join(lines[heads[2]:], "\n"), "● 使用中 #2 ") {
+		t.Errorf("Antigravity active marker missing from account heading:\n%s", buf.String())
 	}
 }
 
@@ -547,7 +549,7 @@ func TestRenderSingleAccountChineseColor(t *testing.T) {
 	var buf bytes.Buffer
 	Render(&buf, sampleCards(now)[:1], Options{Lang: ZhTW, Width: 100, Color: true, Now: now})
 	out := buf.String()
-	for _, want := range []string{"帳號", "● 使用中", "本週額度", "76%", "10/14 17:41", "時間為各額度的重置時間（UTC+8）", "\x1b[1m"} {
+	for _, want := range []string{"帳號", "● 使用中", "本週已用", "76%", "10/14 17:41", "時間為各額度的重置時間（UTC+8）", "\x1b[1m"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -557,7 +559,7 @@ func TestRenderSingleAccountChineseColor(t *testing.T) {
 func TestRenderUnsavedCard(t *testing.T) {
 	var buf bytes.Buffer
 	Render(&buf, []Card{{Provider: "Codex", Email: "new@x.com", Active: true, Unsaved: "cxswap add"}}, Options{Lang: En, Width: 80, Now: time.Now()})
-	if !strings.Contains(buf.String(), "<new@x.com>  No usage data  ● active  not saved, run `cxswap add`") {
+	if !strings.Contains(buf.String(), "● active <new@x.com>  No usage data  not saved, run `cxswap add`") {
 		t.Fatalf("got %q", buf.String())
 	}
 }

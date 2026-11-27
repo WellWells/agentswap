@@ -54,6 +54,7 @@ func main() {
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
 		Getenv:      os.Getenv,
+		Lookup:      os.LookupEnv,
 		Home:        home,
 		Exe:         exe,
 		Version:     version,
@@ -99,6 +100,9 @@ func run(env []string, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	interrupts := make(chan os.Signal, 1)
+	signal.Notify(interrupts, os.Interrupt)
+	defer signal.Stop(interrupts)
 	return cmd.Run()
 }
 

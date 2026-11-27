@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/WellWells/agentswap/internal/fsx"
+	"github.com/WellWells/agentswap/internal/swap"
 	"github.com/WellWells/agentswap/internal/transfer"
 	"github.com/WellWells/agentswap/internal/ui"
 )
@@ -159,21 +160,7 @@ func importAccounts(e Env, names []string, args []string) error {
 	if strings.HasPrefix(path, "--") {
 		return usageError(l.T("unknownFlag", path))
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	f, err := transfer.Parse(data)
-	if err != nil {
-		return err
-	}
-	var pass string
-	if f.Encrypted() {
-		if pass, err = readSecret(e, l.T("passphraseAsk")); err != nil {
-			return err
-		}
-	}
-	bundle, err := f.Open([]byte(pass))
+	bundle, encrypted, err := readBundle(e, path)
 	if err != nil {
 		return err
 	}
@@ -223,7 +210,7 @@ func importAccounts(e Env, names []string, args []string) error {
 		fmt.Fprintln(e.Stdout, l.T("importNone"))
 		return nil
 	}
-	if f.Encrypted() {
+	if encrypted {
 		fmt.Fprintln(e.Stdout, l.T("importDelete", path))
 	} else {
 		fmt.Fprintln(e.Stdout, l.T("importPlainDelete", path))
@@ -231,5 +218,63 @@ func importAccounts(e Env, names []string, args []string) error {
 	if failed > 0 {
 		return errors.New(l.T("importFileIncomplete", failed))
 	}
+	return nil
+}
+
+func readBundle(e Env, path string) (transfer.Bundle, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false, err
+	}
+	f, err := transfer.Parse(data)
+	if err != nil {
+		return nil, false, err
+	}
+	var pass string
+	if f.Encrypted() {
+		pass, err = readSecret(e, e.Lang.T("passphraseAsk"))
+		if err != nil {
+			return nil, true, err
+		}
+	}
+	bundle, err := f.Open([]byte(pass))
+	return bundle, f.Encrypted(), err
+}
+
+func repairAccount(e Env, p provider, m *swap.Manager, args []string) error {
+	if len(args) != 2 {
+		return usageError(e.Lang.T("needsArgs", "repair", 2))
+	}
+	r, err := m.S.Load()
+	if err != nil {
+		return err
+	}
+	i, err := r.Find(args[0])
+	if err != nil {
+		return withQuery(args[0], err)
+	}
+	target := r.Accounts[i]
+	bundle, _, err := readBundle(e, args[1])
+	if err != nil {
+		return err
+	}
+	var match []byte
+	for _, en := range bundle[p.name] {
+		id, err := m.P.Identify(en.Snapshot)
+		if err != nil || id.Key != target.Key {
+			continue
+		}
+		if match != nil {
+			return errors.New(e.Lang.T("repairMatch"))
+		}
+		match = en.Snapshot
+	}
+	if match == nil {
+		return errors.New(e.Lang.T("repairMatch"))
+	}
+	if err = m.Repair(target.Key, match); err != nil {
+		return err
+	}
+	fmt.Fprintln(e.Stdout, e.Lang.T("repairedAccount", label(target)))
 	return nil
 }

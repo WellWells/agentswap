@@ -25,8 +25,8 @@ const (
 )
 
 var (
-	ErrLoginExpired = errors.New("login expired; sign in to this account in agy again")
-	ErrRateLimited  = errors.New("rate limited")
+	ErrLoginExpired = fmt.Errorf("%w; sign in to this account in agy again", swap.ErrUsageLoginExpired)
+	ErrRateLimited  = swap.ErrRateLimited
 )
 
 type httpError int
@@ -53,6 +53,10 @@ func (p Provider) expiring(expiry string) bool {
 }
 
 func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usage, []byte, error) {
+	return p.UsageWithRefresh(ctx, snap, active, nil)
+}
+
+func (p Provider) UsageWithRefresh(ctx context.Context, snap []byte, active bool, save func([]byte) error) (swap.Usage, []byte, error) {
 	c, err := parse(snap)
 	if err != nil {
 		return swap.Usage{}, nil, err
@@ -67,6 +71,11 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 		b, err := p.refresh(ctx, ua, snap, c.Token.RefreshToken)
 		if err != nil {
 			return err
+		}
+		if save != nil && !active {
+			if err := save(b); err != nil {
+				return err
+			}
 		}
 		nc, err := parse(b)
 		if err != nil {
@@ -143,7 +152,7 @@ func (p Provider) call(ctx context.Context, ua, access, method string, body, out
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return ErrRateLimited
+		return swap.RateLimit(resp.Header.Get("Retry-After"), p.now())
 	}
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, resp.Body)
@@ -288,6 +297,9 @@ func (p Provider) refresh(ctx context.Context, ua string, snap []byte, refreshTo
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, swap.RateLimit(resp.Header.Get("Retry-After"), p.now())
+	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, err

@@ -3,7 +3,10 @@ package claude
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +30,20 @@ func oauth(uuid, org, email string) string {
 
 func setup(t *testing.T) (Provider, string) {
 	home := t.TempDir()
-	return New(func(string) string { return "" }, home, "linux", nil), home
+	p := New(func(string) string { return "" }, home, "linux", nil)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		owners := map[string][2]string{"at": {"u1", "o1"}, "atA": {"uA", "o"}, "atB": {"uB", "o"}}
+		id, ok := owners[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+		if r.URL.Path != "/api/oauth/profile" || !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, `{"account":{"uuid":%q},"organization":{"uuid":%q}}`, id[0], id[1])
+	}))
+	t.Cleanup(srv.Close)
+	p.BaseURL = srv.URL
+	p.Now = func() time.Time { return time.UnixMilli(1) }
+	return p, home
 }
 
 func writeLive(t *testing.T, p Provider, credsJSON, config string) {

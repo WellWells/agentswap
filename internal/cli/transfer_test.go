@@ -67,6 +67,7 @@ func TestExportImportAllAgents(t *testing.T) {
 	}
 
 	h2 := newHarness(t)
+	h2.profiles["tok-1"] = h.profiles["tok-1"]
 	h2.interactive = true
 	h2.secrets = []string{testPass}
 	code, out, errs = h2.run("agentswap", "import", path)

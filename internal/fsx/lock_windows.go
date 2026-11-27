@@ -20,9 +20,13 @@ const (
 	errLockViolation  = syscall.Errno(33)
 )
 
-func tryLock(f *os.File) (bool, error) {
+func tryLock(f *os.File, exclusive bool) (bool, error) {
 	var ol syscall.Overlapped
-	r, _, err := procLockFileEx.Call(f.Fd(), lockExclusive|lockFailImmediate, 0, 1, 0, uintptr(unsafe.Pointer(&ol)))
+	flags := uintptr(lockFailImmediate)
+	if exclusive {
+		flags |= lockExclusive
+	}
+	r, _, err := procLockFileEx.Call(f.Fd(), flags, 0, 1, 0, uintptr(unsafe.Pointer(&ol)))
 	if r != 0 {
 		return true, nil
 	}

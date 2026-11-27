@@ -8,9 +8,9 @@ English | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md)
 
 A fast, compact, privacy-first account switcher for Codex, Claude Code and the Antigravity CLI.
 
-With more than one subscription, copying the login file back and forth only lasts a few days: the saved copy expires, and signing in again logs out the account you were using. agentswap keeps every saved account signed in, shows how much of each account's limits is left, and switches with one command. Only the login changes; the rest of your agent's settings stay as they are. Your tokens stay on your machine, encrypted.
+With more than one subscription, copying the login file back and forth only lasts a few days: the saved copy expires, and signing in again logs out the account you were using. agentswap keeps every saved account signed in, shows how much of each account's quota it has used and when it resets, and switches with one command. Only the login changes; the rest of your agent's settings stay as they are. agentswap encrypts your saved account snapshots on this machine.
 
-![agentswap status: 5-hour and weekly limits of every saved Codex, Claude Code and Antigravity account](docs/agentswap-status.png)
+![agentswap status: 5-hour and weekly usage for every saved Codex, Claude Code and Antigravity account](docs/agentswap-status.png)
 
 One small program for macOS, Linux and Windows. Nothing else to install, nothing running in the background.
 
@@ -89,6 +89,8 @@ secret-tool clear service agentswap key vault                # Linux
 
 ## Getting started
 
+Run `agentswap login` to choose an agent, or specify one directly, for example `agentswap login claude work`.
+
 ### Codex
 
 ```sh
@@ -114,17 +116,20 @@ cxswap 2                 # switch to #2
 cxswap -                 # and back
 ```
 
-Restart Codex after switching; if it is still running, `cxswap` offers to close it. Once an account is saved, add more with `cxswap login` rather than `codex login` or `codex logout`, which sign out the account you are using. Codex set to keep its login in the system keyring is not supported yet.
+Restart Codex after switching; if it is still running, `cxswap` offers to close it. Codex set to keep its login in the system keyring is not supported yet.
+
+Use `cxswap login` to add an account in a temporary Codex profile. Running `codex login`, `codex logout`, or `/logout` inside your usual Codex session can revoke its ChatGPT refresh token. Any saved copy of that token also stops working. Run `cxswap login` for the affected account to sign in again. API keys remain valid.
 
 ### Claude Code
 
 ```sh
 ccswap add work          # save the account you are signed in to
+ccswap login personal    # sign in and save another subscription
 ccswap status
 ccswap 2                 # running sessions pick it up on their next request
 ```
 
-Sign in to other accounts with `/login` inside Claude Code, then `ccswap add`. Only the login is swapped; your settings and MCP servers stay as they are. Claude subscription logins only, not API keys.
+`ccswap login` runs the official `claude auth login` in a temporary configuration directory and saves the account you sign in to. Your current Claude session keeps its account. Only the login is swapped; your settings and MCP servers stay as they are. Claude subscription logins only, not API keys.
 
 Coming from claude-swap:
 
@@ -140,11 +145,12 @@ Aliases come along, and accounts you already saved are skipped. Stop using cswap
 
 ```sh
 agswap add work          # save the account you are signed in to
+agswap login personal    # sign in, save and use another account
 agswap list
 agswap 2                 # offers to close running agy first
 ```
 
-To add another account, run `/logout` in agy, sign in to the other account and run `agswap add`. Logging out does not affect saved accounts. agy only picks up a new login when it starts, so `agswap` asks to close every running agy, `agy remote-control` included, and cancels the switch if you say no. The desktop app is not supported yet.
+`agswap login` saves the current account, clears its entry from the system keyring, and opens agy for sign-in. If you exit without signing in, agentswap restores the original entry. Press Ctrl+D to exit agy and save the new active account. Use `agswap -` to return to the previous account. This flow requires agy to store its login in the system keyring. agy only picks up a new login when it starts, so `agswap` asks to close every running agy, `agy remote-control` included, and cancels the switch if you say no. The desktop app is not supported yet.
 
 ### Another computer
 
@@ -172,7 +178,7 @@ Every agent has the same commands. `<account>` is the number from `list`, an ali
 | `cxswap <account>` | switch (also `cxswap switch <account>`); `--yes` closes running sessions without asking |
 | `cxswap -` | switch back to the previous account |
 | `cxswap add [alias]` | save the account you are signed in to |
-| `cxswap login [alias]` | Codex only: sign in to another account and save it |
+| `agentswap login [agent] [alias]` | Sign in with the official CLI and save the account |
 | `ccswap import` | Claude Code only: without a file, import accounts from claude-swap |
 | `cxswap alias <account> [name]` | set an alias, or clear it |
 | `cxswap rm <account>` | forget a saved account (it stays signed in) |
@@ -192,12 +198,24 @@ Run any command without arguments for its help.
 | `AGENTSWAP_NO_UPDATE_CHECK` | set to anything to skip the release check |
 | `NO_COLOR` | plain output |
 
+## Terminal sessions and scripting
+
+`ccswap run work` starts Claude for the saved account named `work` in this terminal. On the first run, sign in with the matching Claude account. Claude keeps a separate login, settings, and conversation history for this profile. Later runs reuse it. Arguments after `--` go to Claude, for example `ccswap run work -- --resume`.
+
+Use `ccswap map work .` in a project, then `ccswap run` anywhere under it. The closest mapping wins. `ccswap map` lists mappings and `ccswap unmap .` removes one. Without a mapping, a bare run starts Claude normally. Mappings and isolated profiles stay on this machine. To sign an isolated profile out before removing its saved account, run `ccswap run work -- auth logout`.
+
+- `agentswap status --json` returns schema version 1 and a `providers` array. Each provider lists accounts, reading status and source, timestamps, quota windows, and a recommendation when applicable. A provider-level failure gives a nonzero exit code and preserves the other results. `cxswap list --json` returns account metadata without querying quotas.
+- `agentswap status --cached --json` reads saved usage without contacting providers or refreshing credentials. Check `observedAt`, `status`, and `retryAt` before acting. After a rate limit the previous reading remains visible. Older readings are excluded from recommendations.
+- `ccswap status --model Fable` recommends among accounts with a reading for that model, considering both its quota and the general limits. A missing model reading is unknown.
+- `ccswap repair work backup.json` restores only the selected saved login from an agentswap export. Use another account as the current login first. Claude recovery verifies the account and organization with Anthropic. Switch to the recovered account when ready. A first Claude login saved offline is marked pending until Anthropic confirms the account and organization.
+
 ## Privacy
 
 agentswap has no server, no sign-up and no telemetry. Here is everything it does with your logins:
 
 - **On your computer**, saved accounts live in `~/.agentswap`, encrypted with a key that only your user on this computer can use, kept by the system: Windows itself, the Keychain on macOS, the keyring on Linux. Copied to another computer, they cannot be opened; `agentswap export` moves them in a file encrypted with a passphrase you choose. On Linux without a keyring, agentswap uses a key file instead and tells you so.
-- **On the network**, each token goes only to the company that issued it, to read usage and keep the login fresh:
+- Isolated `ccswap run` profiles use Claude Code’s native credential storage. The local usage cache stores quota readings, timestamps and error codes without tokens.
+- **On the network**, each token goes only to its issuer to read usage, renew the login or verify which Claude account and organization own it:
 
   | Agent | Hosts |
   |---|---|

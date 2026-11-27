@@ -23,19 +23,20 @@ import (
 )
 
 type harness struct {
-	t      *testing.T
-	home   string
-	codex  string
-	usage  map[string]string
-	claude map[string]string
-	stdin  string
-	srv    *httptest.Server
-	now    time.Time
-	lang   ui.Lang
-	env    map[string]string
-	exe    string
-	exec   func(env []string, name string, args ...string) error
-	output func(env []string, name string, args ...string) ([]byte, error)
+	t        *testing.T
+	home     string
+	codex    string
+	usage    map[string]string
+	claude   map[string]string
+	profiles map[string][2]string
+	stdin    string
+	srv      *httptest.Server
+	now      time.Time
+	lang     ui.Lang
+	env      map[string]string
+	exe      string
+	exec     func(env []string, name string, args ...string) error
+	output   func(env []string, name string, args ...string) ([]byte, error)
 
 	version  string
 	notify   bool
@@ -79,7 +80,17 @@ func (h *harness) Stop(ps []procs.Proc) error {
 func newHarness(t *testing.T) *harness {
 	home := t.TempDir()
 	h := &harness{t: t, home: home, version: "test", codex: filepath.Join(home, ".codex"), usage: map[string]string{}, claude: map[string]string{}, agyUsage: map[string]string{}, now: time.Unix(1791436850, 0).Add(-time.Hour).In(time.FixedZone("", 8*3600))}
+	h.profiles = map[string][2]string{}
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/oauth/profile" {
+			owner, ok := h.profiles[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+			if !ok {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]map[string]string{"account": {"uuid": owner[0]}, "organization": {"uuid": owner[1]}})
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/v1internal:") {
 			body, ok := h.agyUsage[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
 			if !ok {
@@ -198,6 +209,9 @@ func (h *harness) runCmd(stdin []byte, name string, args ...string) ([]byte, int
 			return nil, 1, nil
 		}
 		return h.agy, 0, nil
+	case name == "secret-tool" && strings.Join(args, " ") == "clear service gemini username antigravity":
+		h.agy = nil
+		return nil, 0, nil
 	case name == "secret-tool" && args[0] == "store":
 		h.agy = append([]byte(nil), stdin...)
 		return nil, 0, nil
@@ -343,7 +357,7 @@ func TestAddListSwitchFlow(t *testing.T) {
 	}
 
 	_, out, _ := h.run("cxswap", "status")
-	if !hasLine(out, "#1 work <alice@x.com>") || !hasLine(out, "#2 <bob@x.com> · plus", "● active") {
+	if !hasLine(out, "#1 work <alice@x.com>") || !hasLine(out, "● active #2 <bob@x.com> · plus") {
 		t.Fatalf("list:\n%s", out)
 	}
 
@@ -371,7 +385,7 @@ func TestStatusReportsUnsavedLogin(t *testing.T) {
 func TestErrorsExitOne(t *testing.T) {
 	h := newHarness(t)
 	code, _, errs := h.run("cxswap", "add")
-	if code != 1 || !strings.Contains(errs, "codex login") {
+	if code != 1 || !strings.Contains(errs, "cxswap login") {
 		t.Fatalf("add without login: %d %q", code, errs)
 	}
 	code, _, errs = h.run("cxswap", "nobody")
@@ -417,8 +431,8 @@ func TestListShowsUsageCards(t *testing.T) {
 	h := newHarness(t)
 	setupTwo(t, h)
 	code, out, errs := h.run("cxswap", "status")
-	if code != 0 || !strings.Contains(out, "Codex ───") || !hasLine(out, "Account", "5-hour limit", "Weekly limit") ||
-		!hasLine(out, "#1 <alice@x.com> · plus", "42%", "10%") || !hasLine(out, "#2 <bob@x.com> · prolite", "—", "7%", "● active") {
+	if code != 0 || !strings.Contains(out, "Codex ───") || !hasLine(out, "Account", "Used (5h)", "Used (week)") ||
+		!hasLine(out, "#1 <alice@x.com> · plus", "42%", "10%") || !hasLine(out, "● active #2 <bob@x.com> · prolite", "—", "7%") {
 		t.Fatalf("table:\n%s%s", out, errs)
 	}
 	if strings.Contains(out, "suggested") {
@@ -435,7 +449,8 @@ func TestSuggestsAccountWithMoreHeadroom(t *testing.T) {
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
 	_, out, _ := h.run("cxswap", "status")
-	if !hasLine(out, "#1 <bob@x.com> · prolite", "★ suggested: cxswap 1") {
+	first, _, hasSecond := strings.Cut(out, "#2 ")
+	if !hasSecond || !strings.Contains(first, "#1 <bob@x.com> · prolite") || !strings.Contains(first, "★ suggested: cxswap 1") {
 		t.Fatalf("cxswap:\n%s", out)
 	}
 	_, out, _ = h.run("agentswap", "status")
@@ -451,7 +466,7 @@ func TestListTreatsElapsedWindowAsZero(t *testing.T) {
 	h.login("alice@x.com", "u1", "a1")
 	h.run("cxswap", "add")
 	_, out, _ := h.run("cxswap", "status")
-	if !hasLine(out, "#1 <alice@x.com>", "  0%  ", "10%  Oct 15") || strings.Contains(out, "42%") {
+	if !hasLine(out, "#1 <alice@x.com>", "  0%  ", "10%") || !hasLine(out, "Oct 15") || strings.Contains(out, "42%") {
 		t.Fatalf("5h window after its reset:\n%s", out)
 	}
 }
@@ -470,7 +485,7 @@ func TestStatusShowsAllAccounts(t *testing.T) {
 	h := newHarness(t)
 	setupTwo(t, h)
 	code, out, _ := h.run("cxswap", "status")
-	if code != 0 || !hasLine(out, "#1 <alice@x.com> · plus", "42%") || !hasLine(out, "#2 <bob@x.com> · prolite", "7%", "● active") {
+	if code != 0 || !hasLine(out, "#1 <alice@x.com> · plus", "42%") || !hasLine(out, "● active #2 <bob@x.com> · prolite", "7%") {
 		t.Fatalf("%d\n%s", code, out)
 	}
 }
@@ -481,7 +496,8 @@ func TestStatusIncludesUnsavedLoginWithSavedAccounts(t *testing.T) {
 	h.usage["at-u3"] = plusUsage
 	h.login("carol@x.com", "u3", "a3")
 	_, out, _ := h.run("cxswap", "status")
-	if !hasLine(out, "#1 <alice@x.com>") || !hasLine(out, "#2 <bob@x.com>") || !hasLine(out, "<carol@x.com>", "42%") || !hasLine(out, "● active  not saved, run `cxswap add`") {
+	_, unsaved, found := strings.Cut(out, "● active <carol@x.com>")
+	if !hasLine(out, "#1 <alice@x.com>") || !hasLine(out, "#2 <bob@x.com>") || !found || !hasLine(unsaved, "42%") || !strings.Contains(unsaved, "not saved, run `cxswap add`") {
 		t.Fatalf("%s", out)
 	}
 }
@@ -590,7 +606,7 @@ func TestChineseMessages(t *testing.T) {
 		t.Fatalf("switch: %q", out)
 	}
 	_, out, _ = h.run("cxswap", "status")
-	if !strings.Contains(out, "● 使用中") || !strings.Contains(out, "5 小時額度") || !hasLine(out, "帳號", "5 小時額度", "本週額度") || !hasLine(out, "#1 <alice@x.com>", "42%") {
+	if !strings.Contains(out, "● 使用中") || !strings.Contains(out, "5 小時已用") || !hasLine(out, "帳號", "5 小時已用", "本週已用") || !hasLine(out, "#1 <alice@x.com>", "42%") {
 		t.Fatalf("status:\n%s", out)
 	}
 	code, _, errs := h.run("cxswap", "nobody")
@@ -744,6 +760,7 @@ func TestLoginRefusesKeyringStore(t *testing.T) {
 }
 
 func (h *harness) claudeLogin(uuid, org, email, token string) {
+	h.profiles[token] = [2]string{uuid, org}
 	dir := filepath.Join(h.home, ".claude")
 	os.MkdirAll(dir, 0o700)
 	creds := `{"claudeAiOauth":{"accessToken":"` + token + `","refreshToken":"r-` + token + `","expiresAt":9999999999999,"subscriptionType":"max"},"mcpOAuth":{"keep":true}}`
@@ -757,7 +774,7 @@ const claudeUsageBody = `{"five_hour":{"utilization":30,"resets_at":"2026-10-08T
 func TestClaudeAddUsageSwitchFlow(t *testing.T) {
 	h := newHarness(t)
 	h.claude = map[string]string{"t1": claudeUsageBody, "t2": claudeUsageBody}
-	if code, out, _ := h.run("ccswap", "status"); code != 0 || !strings.Contains(out, "ccswap add") || strings.Contains(out, "ccswap login") {
+	if code, out, _ := h.run("ccswap", "status"); code != 0 || !strings.Contains(out, "ccswap add") || !strings.Contains(out, "ccswap login") {
 		t.Fatalf("empty: %d %q", code, out)
 	}
 	h.claudeLogin("u1", "o1", "a@x", "t1")
@@ -791,19 +808,6 @@ func TestClaudeAddUsageSwitchFlow(t *testing.T) {
 	}
 	if code, out, _ := h.run("agentswap", "status"); code != 0 || !strings.Contains(out, "#2 <b@x>") {
 		t.Fatalf("overview %d %s", code, out)
-	}
-}
-
-func TestClaudeLoginPointsToOfficialApp(t *testing.T) {
-	h := newHarness(t)
-	h.exec = func([]string, string, ...string) error { t.Fatal("ran a login command"); return nil }
-	code, _, errs := h.run("ccswap", "login")
-	if code == 0 || !strings.Contains(errs, "/login") {
-		t.Fatalf("%d %q", code, errs)
-	}
-	_, out, _ := h.run("ccswap", "help")
-	if strings.Contains(out, "ccswap login") || !strings.Contains(out, "ccswap import") {
-		t.Fatalf("help %s", out)
 	}
 }
 
@@ -902,7 +906,7 @@ func TestStatusShowsOneAccount(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errs)
 	}
 	code, out, _ = h.run("cxswap", "status", "bob")
-	if code != 0 || !hasLine(out, "#2 <bob@x.com> · prolite", "● active") || strings.Contains(out, "alice") {
+	if code != 0 || !hasLine(out, "● active #2 <bob@x.com> · prolite") || strings.Contains(out, "alice") {
 		t.Fatalf("%d %q", code, out)
 	}
 	code, out, _ = h.run("cxswap", "status")
@@ -944,7 +948,7 @@ func TestHelpIsSpecificToEachCommand(t *testing.T) {
 		want, deny []string
 	}{
 		{[]string{"cxswap", "help"}, []string{"cxswap status [account]", "cxswap login [alias]", "cxswap <account>", "<account> is the number shown by `cxswap list`", "cxswap import <file>"}, []string{"another tool"}},
-		{[]string{"ccswap", "--help"}, []string{"ccswap status [account]", "ccswap import", "/login", "<account> is the number shown by `ccswap list`"}, []string{"ccswap login", "from cswap", "asks where"}},
+		{[]string{"ccswap", "--help"}, []string{"ccswap status [account]", "ccswap import", "ccswap login [alias]", "<account> is the number shown by `ccswap list`"}, []string{"from cswap", "asks where"}},
 		{[]string{"agentswap", "help"}, []string{"agentswap claude <command>", "agentswap codex <command>", "agentswap link", "ccswap help"}, []string{"login [alias]"}},
 	}
 	for _, c := range cases {
@@ -1110,18 +1114,13 @@ func TestAntigravityAddUsageSwitchFlow(t *testing.T) {
 
 func TestAntigravityLoginAndHelp(t *testing.T) {
 	h := newHarness(t)
-	h.exec = func([]string, string, ...string) error { t.Fatal("ran a login command"); return nil }
-	code, _, errs := h.run("agswap", "login")
-	if code != 1 || !strings.Contains(errs, "sign in with agy") {
-		t.Fatalf("%d %q", code, errs)
-	}
 	_, out, _ := h.run("agswap", "help")
-	for _, w := range []string{"agswap status [account]", "agswap <account> --yes", "/logout", "agy remote-control", "agswap/agyswap"} {
+	for _, w := range []string{"agswap status [account]", "agswap <account> --yes", "Ctrl+D", "agy remote-control", "agswap/agyswap"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
 	}
-	if strings.Contains(out, "agswap login") || strings.Contains(out, "another tool") {
+	if !strings.Contains(out, "agswap login") || strings.Contains(out, "another tool") {
 		t.Errorf("help %s", out)
 	}
 	if code, _, _ := h.run("agswap", "import"); code != 2 {
@@ -1243,7 +1242,7 @@ func TestUnknownFlagAfterCommandIsRejected(t *testing.T) {
 		return nil
 	}
 	for _, args := range [][]string{
-		{"add", "--work"}, {"add", "-w"}, {"login", "--device-auth"}, {"alias", "1", "--work"}, {"remove", "--all"}, {"switch", "--force"}, {"status", "--json"},
+		{"add", "--work"}, {"add", "-w"}, {"login", "--device-auth"}, {"alias", "1", "--work"}, {"remove", "--all"}, {"switch", "--force"}, {"status", "--unknown"},
 	} {
 		code, _, errs := h.run(append([]string{"cxswap"}, args...)...)
 		if flag := args[len(args)-1]; code != 2 || !strings.Contains(errs, "unknown flag "+flag) {

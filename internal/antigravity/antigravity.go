@@ -1,6 +1,7 @@
 package antigravity
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 )
 
 var (
+	ErrLoginChanged     = errors.New("the current agy login changed during backup; run login again")
 	ErrRunning          = errors.New("agy is running; close every agy process before switching accounts")
 	ErrUnsupportedLogin = errors.New("this agy login has no refresh token or Google account id; sign in to agy again")
 )
@@ -26,6 +28,7 @@ const (
 type Keyring interface {
 	Read() ([]byte, error)
 	Write([]byte) error
+	Delete(current []byte) error
 }
 
 type Provider struct {
@@ -56,7 +59,7 @@ func (p Provider) Name() string { return "antigravity" }
 
 func (p Provider) ReadLive() ([]byte, error) { return p.Keyring.Read() }
 
-func (p Provider) WriteLive(b []byte) error {
+func (p Provider) checkStopped() error {
 	if p.Running != nil {
 		running, err := p.Running()
 		if err != nil {
@@ -66,7 +69,28 @@ func (p Provider) WriteLive(b []byte) error {
 			return ErrRunning
 		}
 	}
+	return nil
+}
+
+func (p Provider) WriteLive(b []byte) error {
+	if err := p.checkStopped(); err != nil {
+		return err
+	}
 	return p.Keyring.Write(b)
+}
+
+func (p Provider) ClearLive(expected []byte) error {
+	if err := p.checkStopped(); err != nil {
+		return err
+	}
+	raw, err := p.ReadLive()
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(raw, expected) {
+		return ErrLoginChanged
+	}
+	return p.Keyring.Delete(raw)
 }
 
 type token struct {

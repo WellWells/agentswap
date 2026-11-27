@@ -24,12 +24,13 @@ var (
 )
 
 type Account struct {
-	Key     string    `json:"key"`
-	Alias   string    `json:"alias,omitempty"`
-	Email   string    `json:"email"`
-	Plan    string    `json:"plan,omitempty"`
-	Mode    string    `json:"mode,omitempty"`
-	AddedAt time.Time `json:"added_at"`
+	Key          string    `json:"key"`
+	Alias        string    `json:"alias,omitempty"`
+	Email        string    `json:"email"`
+	Plan         string    `json:"plan,omitempty"`
+	Mode         string    `json:"mode,omitempty"`
+	AddedAt      time.Time `json:"added_at"`
+	PendingOwner bool      `json:"pending_owner,omitempty"`
 }
 
 type Registry struct {

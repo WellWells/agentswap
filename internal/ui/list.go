@@ -57,9 +57,12 @@ func List(w io.Writer, provider string, cards []Card, cmd func(Card) string, o O
 		case c.Unsaved != "":
 			r.action, r.color = l.T("unsaved", c.Unsaved), colorDim
 		case c.Active:
-			r.action, r.color = l.T("active"), colorActive
+			r.action, r.color = c.activeTag(l), colorActive
 		default:
 			r.action = cmd(c)
+		}
+		if c.PendingOwner {
+			r.action += " · " + l.T("pendingOwner")
 		}
 		rows = append(rows, r)
 	}

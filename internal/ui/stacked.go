@@ -65,43 +65,35 @@ func stacked(group []Card, cols []column, o Options, p painter) ([]string, bool)
 		for _, line := range wrapText(cardTitle(c), o.Width) {
 			lines = append(lines, p.bold(line))
 		}
+		if c.Active {
+			add(c.activeTag(o.Lang), colorActive)
+		}
 		for _, tag := range cardTags(c, o) {
 			add(tag.text, tag.color)
+		}
+		if c.staleReading() {
+			add(o.Lang.T("staleReading"), colorWarn)
 		}
 		if msg, code := cardMessage(c, o.Lang); msg != "" {
 			add(msg, code)
 			continue
 		}
 		for _, col := range cols {
-			for _, win := range c.Usage.Windows {
-				if win.Minutes != col.key.minutes || win.Label != col.key.label {
-					continue
-				}
-				add(col.head, colorDim)
-				pct := win.Percent(o.Now)
-				text := padLeft(strconv.Itoa(pct)+"%", 4)
-				if pct >= 80 {
-					text = p.color(fillColor(pct), text)
-				}
-				bar := min(8, width-5)
-				if bar > 0 {
-					text = Bar(pct, bar, o.Color) + " " + text
-				}
-				when := resetsAt(win, o)
-				if when != "" && visibleWidth(text)+2+displayWidth(when) <= width {
-					text += "  " + p.color(colorDim, when)
-					when = ""
-				}
-				if visibleWidth(text) <= width {
-					lines = append(lines, indent+text)
-				} else {
-					add(strconv.Itoa(pct)+"%", fillColor(pct))
-				}
-				if when != "" {
-					add(when, colorDim)
-				}
-				shown = shown || resetsAt(win, o) != ""
-				break
+			win := c.window(col.key)
+			if win == nil {
+				continue
+			}
+			add(col.head, colorDim)
+			pct := displayedPercent(c, *win, o.Now)
+			text := usageMeter(pct, min(8, width-5), o.Color)
+			if visibleWidth(text) <= width {
+				lines = append(lines, indent+text)
+			} else {
+				add(strconv.Itoa(pct)+"%", fillColor(pct))
+			}
+			if when := resetsAt(*win, o); when != "" {
+				add(when, colorDim)
+				shown = true
 			}
 		}
 	}

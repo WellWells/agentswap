@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"net/http"
 	"net/url"
@@ -32,9 +33,9 @@ const (
 var defaultScopes = []string{"user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"}
 
 var (
-	ErrLoginExpired = errors.New("login expired; log in to this account again")
-	ErrRateLimited  = errors.New("rate limited")
-	ErrActiveStale  = errors.New("token expired")
+	ErrLoginExpired = fmt.Errorf("%w; log in to this account again", swap.ErrUsageLoginExpired)
+	ErrRateLimited  = swap.ErrRateLimited
+	ErrActiveStale  = swap.ErrUsageActiveStale
 )
 
 type httpError int
@@ -56,15 +57,37 @@ func (p Provider) client() *http.Client {
 }
 
 func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usage, []byte, error) {
+	return p.UsageWithRefresh(ctx, snap, active, nil)
+}
+
+func (p Provider) UsageWithRefresh(ctx context.Context, snap []byte, active bool, save func([]byte) error) (swap.Usage, []byte, error) {
 	ai, err := aiOf(snap)
 	if err != nil {
 		return swap.Usage{}, nil, err
 	}
 	var refreshed []byte
 	renew := func() error {
+		if save != nil {
+			unlock, err := p.LockLive()
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			if err := p.checkInactiveGrant(snap); err != nil {
+				return err
+			}
+			if err := p.fence(); err != nil {
+				return err
+			}
+		}
 		b, err := p.refresh(ctx, snap, ai.RefreshToken, ai.Scopes)
 		if err != nil {
 			return err
+		}
+		if save != nil && !active {
+			if err := save(b); err != nil {
+				return err
+			}
 		}
 		refreshed, snap = b, b
 		ai, err = aiOf(b)
@@ -92,6 +115,31 @@ func (p Provider) Usage(ctx context.Context, snap []byte, active bool) (swap.Usa
 		}
 	}
 	return u, refreshed, err
+}
+
+func (p Provider) checkInactiveGrant(snap []byte) error {
+	live, err := p.ReadLive()
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if p.SameLogin(live, snap) {
+		return ErrActiveStale
+	}
+	liveID, err := p.Identify(live)
+	if err != nil {
+		return err
+	}
+	savedID, err := p.Identify(snap)
+	if err != nil {
+		return err
+	}
+	if savedID.Key == liveID.Key {
+		return ErrActiveStale
+	}
+	return nil
 }
 
 func (p Provider) fetchWithRetry(ctx context.Context, access string) (swap.Usage, error) {
@@ -122,6 +170,18 @@ func transient(err error) bool {
 type apiWindow struct {
 	Utilization *float64 `json:"utilization"`
 	ResetsAt    *string  `json:"resets_at"`
+}
+
+func fillWindow(w **apiWindow, pct *float64, resets *string) {
+	if *w == nil {
+		*w = &apiWindow{}
+	}
+	if (*w).Utilization == nil {
+		(*w).Utilization = pct
+	}
+	if (*w).ResetsAt == nil {
+		(*w).ResetsAt = resets
+	}
 }
 
 func window(pct *float64, resets *string, minutes int, label string) (swap.Window, bool) {
@@ -159,7 +219,7 @@ func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return swap.Usage{}, ErrRateLimited
+		return swap.Usage{}, swap.RateLimit(resp.Header.Get("Retry-After"), p.now())
 	}
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, resp.Body)
@@ -171,6 +231,7 @@ func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, er
 		Opus     *apiWindow `json:"seven_day_opus"`
 		Sonnet   *apiWindow `json:"seven_day_sonnet"`
 		Limits   []struct {
+			Kind  string `json:"kind"`
 			Scope struct {
 				Model struct {
 					DisplayName string `json:"display_name"`
@@ -187,6 +248,17 @@ func (p Provider) fetchUsage(ctx context.Context, access string) (swap.Usage, er
 	add := func(w swap.Window, ok bool) {
 		if ok {
 			u.Windows = append(u.Windows, w)
+		}
+	}
+	for _, l := range r.Limits {
+		if l.Scope.Model.DisplayName != "" {
+			continue
+		}
+		switch l.Kind {
+		case "session":
+			fillWindow(&r.FiveHour, l.Percent, l.ResetsAt)
+		case "weekly_all":
+			fillWindow(&r.SevenDay, l.Percent, l.ResetsAt)
 		}
 	}
 	if r.FiveHour != nil {
@@ -245,6 +317,9 @@ func (p Provider) refresh(ctx context.Context, snap []byte, refreshToken string,
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, swap.RateLimit(resp.Header.Get("Retry-After"), p.now())
+	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, err
@@ -256,15 +331,35 @@ func (p Provider) refresh(ctx context.Context, snap []byte, refreshToken string,
 		return nil, fmt.Errorf("token refresh: %w", httpError(resp.StatusCode))
 	}
 	var t struct {
-		AccessToken  string  `json:"access_token"`
-		RefreshToken string  `json:"refresh_token"`
-		ExpiresIn    float64 `json:"expires_in"`
-		Scope        string  `json:"scope"`
+		AccessToken      string  `json:"access_token"`
+		RefreshToken     string  `json:"refresh_token"`
+		ExpiresIn        float64 `json:"expires_in"`
+		RefreshExpiresIn float64 `json:"refresh_token_expires_in"`
+		Scope            string  `json:"scope"`
+		Account          struct {
+			UUID string `json:"uuid"`
+		} `json:"account"`
+		Organization struct {
+			UUID string `json:"uuid"`
+		} `json:"organization"`
 	}
 	if err := json.Unmarshal(data, &t); err != nil || t.AccessToken == "" {
 		return nil, errors.New("token refresh: response has no access_token")
 	}
-	return p.applyTokens(snap, t.AccessToken, t.RefreshToken, t.ExpiresIn, t.Scope)
+	if t.Account.UUID != "" || t.Organization.UUID != "" {
+		e, err := unpack(snap)
+		if err != nil {
+			return nil, err
+		}
+		var account OAuthAccount
+		if err := json.Unmarshal(e.OAuthAccount, &account); err != nil {
+			return nil, err
+		}
+		if (t.Account.UUID != "" && t.Account.UUID != account.AccountUUID) || (t.Organization.UUID != "" && t.Organization.UUID != account.Organization()) {
+			return nil, swap.ErrMismatch
+		}
+	}
+	return p.applyTokens(snap, t.AccessToken, t.RefreshToken, t.ExpiresIn, t.RefreshExpiresIn, t.Scope)
 }
 
 func deadRefresh(status int, body []byte) bool {
@@ -278,7 +373,7 @@ func deadRefresh(status int, body []byte) bool {
 	return e.Error == "invalid_grant"
 }
 
-func (p Provider) applyTokens(snap []byte, access, refresh string, expiresIn float64, scope string) ([]byte, error) {
+func (p Provider) applyTokens(snap []byte, access, refresh string, expiresIn, refreshExpiresIn float64, scope string) ([]byte, error) {
 	e, err := unpack(snap)
 	if err != nil {
 		return nil, err
@@ -300,6 +395,9 @@ func (p Provider) applyTokens(snap []byte, access, refresh string, expiresIn flo
 	}
 	if expiresIn > 0 {
 		set("expiresAt", json.Number(strconv.FormatInt(p.now().UnixMilli()+int64(expiresIn*1000), 10)))
+	}
+	if refreshExpiresIn > 0 {
+		set("refreshTokenExpiresAt", p.now().UnixMilli()+int64(refreshExpiresIn*1000))
 	}
 	if scope != "" {
 		set("scopes", strings.Fields(scope))

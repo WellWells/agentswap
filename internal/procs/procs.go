@@ -1,6 +1,7 @@
 package procs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,19 +10,22 @@ import (
 	"time"
 
 	"github.com/WellWells/agentswap/internal/execx"
+	"github.com/WellWells/agentswap/internal/fsx"
 )
 
 type Proc struct {
-	PID   int
-	PPID  int
-	Name  string
-	Path  string
-	Other bool
+	PID     int
+	PPID    int
+	Name    string
+	Path    string
+	Other   bool
+	started int64
 }
 
 type System struct {
-	Run  execx.Runner
-	Wait time.Duration
+	Run       execx.Runner
+	Wait      time.Duration
+	ClaudeDir string
 }
 
 func baseName(name string) string {
@@ -30,6 +34,10 @@ func baseName(name string) string {
 }
 
 func Filter(all []Proc, names, skipPaths []string, self int) []Proc {
+	return filter(all, names, skipPaths, self, nil)
+}
+
+func filter(all []Proc, names, skipPaths []string, self int, sessions map[int]bool) []Proc {
 	byPID := map[int]Proc{}
 	for _, p := range all {
 		byPID[p.PID] = p
@@ -48,9 +56,71 @@ func Filter(all []Proc, names, skipPaths []string, self int) []Proc {
 		if mine[p.PID] || p.Other || !wanted(p, names, skipPaths) {
 			continue
 		}
+		if len(sessions) > 0 && baseName(p.Name) == "claude" && managedChild(p, byPID, sessions) {
+			continue
+		}
 		out = append(out, p)
 	}
 	return out
+}
+
+func managedChild(p Proc, processes map[int]Proc, sessions map[int]bool) bool {
+	for steps := 0; p.PPID > 0 && steps < len(processes); steps++ {
+		parent, ok := processes[p.PPID]
+		if !ok || parent.Other || (p.started != 0 && parent.started > p.started) {
+			break
+		}
+		if sessions[parent.PID] {
+			return true
+		}
+		p = parent
+	}
+	return false
+}
+
+func RegisterSession(claudeDir string) (func(), error) {
+	return registerSession(claudeDir, os.Getpid())
+}
+
+func registerSession(claudeDir string, pid int) (func(), error) {
+	path := filepath.Join(claudeDir, "running", strconv.Itoa(pid))
+	lease, err := fsx.Acquire(path, 2*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		lease.Release()
+		os.Remove(path)
+	}, nil
+}
+
+func (s System) sessionPIDs() (map[int]bool, error) {
+	if s.ClaudeDir == "" {
+		return nil, nil
+	}
+	dir := filepath.Join(s.ClaudeDir, "running")
+	files, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	pids := make(map[int]bool)
+	for _, file := range files {
+		pid, err := strconv.Atoi(file.Name())
+		if err != nil || pid <= 0 || !file.Type().IsRegular() {
+			continue
+		}
+		locked, err := fsx.Locked(filepath.Join(dir, file.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if locked {
+			pids[pid] = true
+		}
+	}
+	return pids, nil
 }
 
 func wanted(p Proc, names, skipPaths []string) bool {
@@ -81,7 +151,17 @@ func (s System) Find(names, skipPaths []string) ([]Proc, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Filter(all, names, skipPaths, os.Getpid()), nil
+	var sessions map[int]bool
+	for _, name := range names {
+		if name == "claude" {
+			sessions, err = s.sessionPIDs()
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	return filter(all, names, skipPaths, os.Getpid(), sessions), nil
 }
 
 func (s System) remaining(ps []Proc) []Proc {

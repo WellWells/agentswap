@@ -3,7 +3,6 @@ package claude
 import (
 	"bytes"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -49,14 +48,28 @@ func (k Keychain) Write(b []byte) error {
 	value := hex.EncodeToString(b)
 	line := fmt.Sprintf("add-generic-password -U -a %s -s %s -X %s\n", quote(k.Account), quote(k.Service), value)
 	if len(line) > 4032 {
-		return errors.New("credentials too large to write to the keychain safely")
+		return errKeychainTooLarge
 	}
 	_, code, err := k.run([]byte(line), "-i")
 	if err != nil {
 		return err
 	}
+	if code == 36 {
+		return ErrKeychainLocked
+	}
 	if code != 0 {
 		return fmt.Errorf("security add-generic-password: exit %d", code)
+	}
+	return nil
+}
+
+func (k Keychain) Delete() error {
+	_, code, err := k.run(nil, "delete-generic-password", "-a", k.Account, "-s", k.Service)
+	if err != nil {
+		return err
+	}
+	if code != 0 && code != 44 {
+		return fmt.Errorf("security delete-generic-password: exit %d", code)
 	}
 	return nil
 }

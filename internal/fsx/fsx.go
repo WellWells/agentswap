@@ -60,7 +60,7 @@ func Acquire(path string, timeout time.Duration) (*Lock, error) {
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		ok, err := tryLock(f)
+		ok, err := tryLock(f, true)
 		if err != nil {
 			f.Close()
 			return nil, err
@@ -74,6 +74,22 @@ func Acquire(path string, timeout time.Duration) (*Lock, error) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+func Locked(path string) (bool, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	ok, err := tryLock(f, false)
+	if err != nil || !ok {
+		return !ok, err
+	}
+	return false, unlock(f)
 }
 
 func (l *Lock) Release() error {

@@ -17,6 +17,7 @@ var (
 	kernel32       = syscall.NewLazyDLL("kernel32.dll")
 	procCredRead   = advapi32.NewProc("CredReadW")
 	procCredWrite  = advapi32.NewProc("CredWriteW")
+	procCredDelete = advapi32.NewProc("CredDeleteW")
 	procCredFree   = advapi32.NewProc("CredFree")
 	procSnapshot   = kernel32.NewProc("CreateToolhelp32Snapshot")
 	procFirstEntry = kernel32.NewProc("Process32FirstW")
@@ -85,6 +86,21 @@ func (w winCred) Write(b []byte) error {
 	runtime.KeepAlive(b)
 	if r == 0 {
 		return fmt.Errorf("CredWriteW: %w", err)
+	}
+	return nil
+}
+
+func (w winCred) Delete(current []byte) error {
+	if len(current) > maxBlob {
+		return fmt.Errorf("cannot restore a %d-byte Windows credential", len(current))
+	}
+	name, err := syscall.UTF16PtrFromString(w.target)
+	if err != nil {
+		return err
+	}
+	r, _, err := procCredDelete.Call(uintptr(unsafe.Pointer(name)), credTypeGeneric, 0)
+	if r == 0 {
+		return fmt.Errorf("CredDeleteW: %w", err)
 	}
 	return nil
 }

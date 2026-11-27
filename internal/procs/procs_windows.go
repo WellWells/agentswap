@@ -55,12 +55,17 @@ func currentSID() string {
 	return tokenSID(t)
 }
 
-func inspect(pid uint32, self string) (string, bool) {
+func inspect(pid uint32, self string) (string, bool, int64) {
 	h, err := syscall.OpenProcess(queryLimitedInfo, false, pid)
 	if err != nil {
-		return "", true
+		return "", true, 0
 	}
 	defer syscall.CloseHandle(h)
+	var created, exited, kernel, user syscall.Filetime
+	var started int64
+	if syscall.GetProcessTimes(h, &created, &exited, &kernel, &user) == nil {
+		started = created.Nanoseconds()
+	}
 	path := ""
 	buf := make([]uint16, 1024)
 	n := uint32(len(buf))
@@ -69,11 +74,11 @@ func inspect(pid uint32, self string) (string, bool) {
 	}
 	var t syscall.Token
 	if self == "" || syscall.OpenProcessToken(h, syscall.TOKEN_QUERY, &t) != nil {
-		return path, false
+		return path, false, started
 	}
 	defer t.Close()
 	owner := tokenSID(t)
-	return path, owner != "" && owner != self
+	return path, owner != "" && owner != self, started
 }
 
 func list(execx.Runner) ([]Proc, error) {
@@ -88,8 +93,8 @@ func list(execx.Runner) ([]Proc, error) {
 	var out []Proc
 	r, _, _ := procFirst.Call(h, uintptr(unsafe.Pointer(&e)))
 	for r != 0 {
-		path, other := inspect(e.ProcessID, self)
-		out = append(out, Proc{PID: int(e.ProcessID), PPID: int(e.ParentProcessID), Name: syscall.UTF16ToString(e.ExeFile[:]), Path: path, Other: other})
+		path, other, started := inspect(e.ProcessID, self)
+		out = append(out, Proc{PID: int(e.ProcessID), PPID: int(e.ParentProcessID), Name: syscall.UTF16ToString(e.ExeFile[:]), Path: path, Other: other, started: started})
 		r, _, _ = procNext.Call(h, uintptr(unsafe.Pointer(&e)))
 	}
 	return out, nil

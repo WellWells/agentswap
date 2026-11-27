@@ -11,6 +11,15 @@ type SameLogin interface {
 	SameLogin(a, b []byte) bool
 }
 
+type LoginVerifier interface {
+	VerifyOwner([]byte) error
+	CheckReplacement(saved, incoming []byte, freshLogin bool) error
+}
+
+type SnapshotFilter interface {
+	AccountSnapshot([]byte) ([]byte, error)
+}
+
 type LiveLocker interface {
 	LockLive() (func(), error)
 }
