@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 
 	"github.com/WellWells/agentswap/internal/cli"
@@ -57,7 +59,7 @@ func main() {
 		Lookup:      os.LookupEnv,
 		Home:        home,
 		Exe:         exe,
-		Version:     version,
+		Version:     buildVersion(version, debug.ReadBuildInfo),
 		Lang:        ui.DetectLang(os.Getenv, ui.SystemLanguages),
 		Color:       color,
 		Width:       width,
@@ -71,6 +73,18 @@ func main() {
 		Releases:    update.Source{Repo: repo},
 		Endpoints:   endpoints(),
 	}))
+}
+
+var releaseTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
+func buildVersion(v string, info func() (*debug.BuildInfo, bool)) string {
+	if v != "dev" {
+		return v
+	}
+	if bi, ok := info(); ok && releaseTag.MatchString(bi.Main.Version) {
+		return bi.Main.Version
+	}
+	return v
 }
 
 func forward(exe string) (int, bool) {
