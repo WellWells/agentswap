@@ -13,6 +13,8 @@ import (
 	"github.com/WellWells/agentswap/internal/swap"
 )
 
+const familySkew = 60_000
+
 func (p Provider) CheckReplacement(saved, incoming []byte, freshLogin bool) error {
 	known, err := replacementKnown(saved, incoming, freshLogin)
 	if err != nil || known {
@@ -39,10 +41,10 @@ func replacementKnown(saved, incoming []byte, freshLogin bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if old.RefreshTokenExpiresAt > 0 && next.RefreshTokenExpiresAt > 0 && next.RefreshTokenExpiresAt < old.RefreshTokenExpiresAt {
+	if old.RefreshTokenExpiresAt > 0 && next.RefreshTokenExpiresAt > 0 && next.RefreshTokenExpiresAt < old.RefreshTokenExpiresAt-familySkew {
 		return false, swap.ErrStaleLogin
 	}
-	newFamily := old.RefreshTokenExpiresAt > 0 && next.RefreshTokenExpiresAt > old.RefreshTokenExpiresAt
+	newFamily := old.RefreshTokenExpiresAt > 0 && next.RefreshTokenExpiresAt > old.RefreshTokenExpiresAt+familySkew
 	if !newFamily && next.ExpiresAt > 0 && old.ExpiresAt > next.ExpiresAt {
 		return false, swap.ErrStaleLogin
 	}
