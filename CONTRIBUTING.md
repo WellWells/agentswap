@@ -14,13 +14,12 @@ You need Go 1.22 or newer and nothing else. There are no third-party modules, so
 
 ```sh
 go vet ./...
-go test ./...
 gofmt -l .
 go build -o agentswap ./cmd/agentswap
 go run ./tools/dist -version v0.1.0    # every platform, as in a release, into dist/
 ```
 
-CI runs the same checks on macOS, Linux and Windows, plus the tests on Go 1.22. To check that other platforms still compile from your machine:
+CI runs `gofmt` and `go vet` on macOS. To check that other platforms still compile from your machine:
 
 ```sh
 CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go vet ./...

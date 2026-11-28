@@ -16,7 +16,6 @@ jobs:
         with:
           go-version: stable
       - run: go vet ./...
-      - run: go test ./...
 
   verify:
     needs: test

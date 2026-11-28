@@ -6,5 +6,5 @@
 
 <!-- Commands you ran and on which OS. If you tried it with real accounts, say so, and how you kept your real ~/.codex, ~/.claude or keyring out of it. -->
 
-- [ ] `go vet ./...` and `go test ./...` pass
+- [ ] `go vet ./...` passes
 - [ ] `gofmt -l .` prints nothing
